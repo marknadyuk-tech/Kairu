@@ -455,8 +455,8 @@ const defaultState = {
   dailyXPLedger: {},
   xpLog: [],
   rankHistory: [],
-  titlesEarned: [],
-  activeTitle: null,
+  titlesEarned: ["Awakened"],
+  activeTitle: "Awakened",
   verifiedCredentials: 0,
   specialConditionsMet: {},
   serendipity: {
@@ -510,23 +510,10 @@ const defaultState = {
     trackingActive: false,
     startDate: null
   },
-  skills: [
-    { id: 'sk-001', name: 'Sales & Negotiation', category: 'Business / Leadership', tier: 'expert', xp: 2500, xpMax: 3000, tags: ['Closing', 'Deal Structure', 'Persuasion'] },
-    { id: 'sk-002', name: 'Strategy & Vision', category: 'Business / Leadership', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Systems Thinking', 'Macro Planning', 'Governance'] },
-    { id: 'sk-003', name: 'Executive Founder / DSII', category: 'Business / Leadership', tier: 'acquiring', xp: 1000, xpMax: 2500, tags: ['Governance', 'Capital Strategy', 'City Dev'] },
-    { id: 'sk-004', name: 'AI Tools & Prompting', category: 'Technical / Digital', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Prompt Engineering', 'Workflow AI'] },
-    { id: 'sk-005', name: 'Web / App Building', category: 'Technical / Digital', tier: 'acquiring', xp: 1000, xpMax: 2500, tags: ['HTML/CSS', 'JavaScript', 'Cursor AI'] },
-    { id: 'sk-006', name: 'Data & Analytics', category: 'Technical / Digital', tier: 'acquiring', xp: 1000, xpMax: 2500, tags: ['Dashboards', 'Metrics', 'Insight Loops'] },
-    { id: 'sk-007', name: 'Automation & Systems', category: 'Technical / Digital', tier: 'acquiring', xp: 1000, xpMax: 2500, tags: ['Workflows', 'AI Agents', 'No-Code'] },
-    { id: 'sk-008', name: 'Pharmacy Technician', category: 'Technical / Digital', tier: 'acquiring', xp: 1000, xpMax: 2500, tags: ['Certification Required', 'Pharmacology'] },
-    { id: 'sk-009', name: 'Drone Pilot', category: 'Technical / Digital', tier: 'acquiring', xp: 1000, xpMax: 2500, tags: ['FAA Part 107', 'Ag Drone', 'Aerial Ops'] },
-    { id: 'sk-010', name: 'Design & Visual', category: 'Creative / Arts', tier: 'expert', xp: 2500, xpMax: 3000, tags: ['Visual Identity', 'Composition', 'Brand'] },
-    { id: 'sk-011', name: 'Video & Film', category: 'Creative / Arts', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Editing', 'Direction', 'Storytelling'] },
-    { id: 'sk-012', name: 'Strength & Conditioning', category: 'Physical / Athletic', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Resistance Training', 'Programming', 'Recovery'] },
-    { id: 'sk-013', name: 'Endurance / Cardio', category: 'Physical / Athletic', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Zone 2', 'VO2 Max', 'Pacing'] },
-    { id: 'sk-014', name: 'Wrestling', category: 'Physical / Athletic', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Grappling', 'Takedowns', 'Control'] },
-    { id: 'sk-015', name: 'Swimming', category: 'Physical / Athletic', tier: 'proficient', xp: 1800, xpMax: 2500, tags: ['Technique', 'Endurance', 'Stroke Work'] }
-  ]
+  // Skills start empty for every new operator. The registry is populated through
+  // onboarding (resume extraction, career selection, or manual creation) so KAIRU
+  // ships as a clean product rather than seeded with one person's capabilities.
+  skills: []
 };
 
 let state = structuredClone(defaultState);
@@ -693,8 +680,51 @@ function normalizeDiscipline(disc = {}, index = 0) {
     timeBlock: disc.timeBlock || fallback.timeBlock || "08:00",
     durationMinutes: Number(disc.durationMinutes ?? fallback.durationMinutes ?? 15) || 15,
     source: disc.source || fallback.source || "custom",
+    // anchorDate seeds the recurrence math for weekly/monthly/seasonal/annual
+    // protocols. Legacy disciplines without one are treated as always-applicable.
+    anchorDate: disc.anchorDate || fallback.anchorDate || null,
     protocol: disc.protocol || fallback.protocol || ""
   };
+}
+
+// Frequencies KAIRU understands. "4x/week" + "custom" are legacy/back-compat and
+// always surface; the dated frequencies only surface on the days they apply.
+const DISCIPLINE_FREQUENCIES = ["daily", "weekly", "monthly", "seasonal", "annual", "4x/week", "custom"];
+
+// disciplineAppliesToday(disc) -> boolean. Pure. Decides whether a protocol should
+// surface in today's Day Protocol / Command brief. Missing anchor => always show.
+function disciplineAppliesToday(disc) {
+  const freq = String(disc && disc.frequency || "daily").toLowerCase();
+  if (freq === "daily" || freq === "4x/week" || freq === "custom") return true;
+
+  const anchorStr = disc && disc.anchorDate;
+  if (!anchorStr) return true; // never hide a protocol we can't schedule
+
+  const now = new Date(`${localToday()}T00:00:00`);
+  const anchor = new Date(`${anchorStr}T00:00:00`);
+  if (Number.isNaN(anchor.valueOf())) return true;
+
+  // Clamp an anchor day-of-month to the current month's length (e.g. 31 -> 30/28).
+  const clampDay = (day, ref) => {
+    const last = new Date(ref.getFullYear(), ref.getMonth() + 1, 0).getDate();
+    return Math.min(day, last);
+  };
+
+  switch (freq) {
+    case "weekly":
+      return now.getDay() === anchor.getDay();
+    case "monthly":
+      return now.getDate() === clampDay(anchor.getDate(), now);
+    case "seasonal": {
+      // Every 3rd month from the anchor month, on the anchor day-of-month.
+      const monthDelta = (now.getFullYear() - anchor.getFullYear()) * 12 + (now.getMonth() - anchor.getMonth());
+      return monthDelta % 3 === 0 && now.getDate() === clampDay(anchor.getDate(), now);
+    }
+    case "annual":
+      return now.getMonth() === anchor.getMonth() && now.getDate() === clampDay(anchor.getDate(), now);
+    default:
+      return true;
+  }
 }
 
 function normalizeArchetype(value) {
@@ -1039,7 +1069,9 @@ function normalizeState(raw) {
     merged.identity.tier = "E";
   }
   merged.titlesEarned = Array.isArray(merged.titlesEarned) ? merged.titlesEarned : [];
-  merged.activeTitle = merged.activeTitle || null;
+  // "Awakened" is auto-awarded to every operator the moment they enter KAIRU.
+  if (!merged.titlesEarned.includes("Awakened")) merged.titlesEarned.unshift("Awakened");
+  merged.activeTitle = merged.activeTitle || "Awakened";
   merged.verifiedCredentials = Number(merged.verifiedCredentials) || 0;
   merged.specialConditionsMet = (merged.specialConditionsMet && typeof merged.specialConditionsMet === 'object')
     ? merged.specialConditionsMet : {};
@@ -1222,10 +1254,31 @@ function setView(view) {
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.view === view));
   $$(".view").forEach((section) => section.classList.toggle("active", section.id === view));
 
+  // Mobile bottom nav: highlight the matching primary item. Views that live behind
+  // the "More" sheet (tasks/pipeline/financial/archive) leave every primary inactive.
+  $$(".bottom-nav__item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
+  closeMore();
+
   const nextCopy = copy[view];
-  els.viewEyebrow.textContent = nextCopy.eyebrow;
-  els.viewTitle.textContent = nextCopy.title;
-  els.viewCopy.textContent = nextCopy.text;
+  if (nextCopy) {
+    els.viewEyebrow.textContent = nextCopy.eyebrow;
+    els.viewTitle.textContent = nextCopy.title;
+    els.viewCopy.textContent = nextCopy.text;
+  }
+
+  // Bring the freshly shown view into focus on mobile (content scrolls under header).
+  const mainEl = document.querySelector(".main");
+  if (mainEl) mainEl.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function openMore() {
+  const sheet = document.getElementById("moreSheet");
+  if (sheet) sheet.classList.add("open");
+}
+
+function closeMore() {
+  const sheet = document.getElementById("moreSheet");
+  if (sheet) sheet.classList.remove("open");
 }
 
 function trackToday() {
@@ -2535,8 +2588,12 @@ function renderTrack() {
     ? "+3% XP is active for every quest completion logged today."
     : "Lock in today to activate the +3% XP boost on all completions before midnight.";
 
+  // When tracked, the action button is fully replaced by a non-interactive locked
+  // badge so today cannot be re-fired (accidental reactivation is impossible).
   const button = $('[data-action="track"]');
-  button.hidden = tracked;
+  const badge = document.getElementById("trackLocked");
+  if (button) button.hidden = tracked;
+  if (badge) badge.hidden = !tracked;
 }
 
 function renderQuests() {
@@ -2852,6 +2909,7 @@ function saveDiscipline() {
     xpPerCompletion,
     timeBlock,
     durationMinutes,
+    anchorDate: localToday(),
     source: category === "Faith / Belief" ? "faith-custom" : "custom",
     protocol
   }, state.disciplines.length));
@@ -3052,7 +3110,8 @@ function disciplineCardTemplate(disc) {
 function renderDisciplineSchedule() {
   const container = document.getElementById('disciplineSchedule');
   if (!container) return;
-  const disciplines = sortDisciplinesBySchedule(Array.isArray(state.disciplines) ? state.disciplines : []);
+  // Day Protocol shows only the protocols that apply to today.
+  const disciplines = sortDisciplinesBySchedule((Array.isArray(state.disciplines) ? state.disciplines : []).filter(disciplineAppliesToday));
 
   container.innerHTML = disciplines.length
     ? disciplines.map(disc => {
@@ -3134,7 +3193,8 @@ function renderDisciplineWeek() {
 function renderDisciplines() {
   const groupsContainer = document.getElementById('disciplineGroups');
   const faithContainer = document.getElementById('faithDisciplineList');
-  const disciplines = sortDisciplinesBySchedule(Array.isArray(state.disciplines) ? state.disciplines : []);
+  // Card groups mirror the Day Protocol: only what applies today is shown.
+  const disciplines = sortDisciplinesBySchedule((Array.isArray(state.disciplines) ? state.disciplines : []).filter(disciplineAppliesToday));
   const faithDisciplines = disciplines.filter(isFaithDiscipline);
   const ordinaryDisciplines = disciplines.filter(disc => !isFaithDiscipline(disc));
 
@@ -3149,7 +3209,7 @@ function renderDisciplines() {
 
   if (groupsContainer) {
     if (!ordinaryDisciplines.length) {
-      groupsContainer.innerHTML = '<div class="empty">No custom disciplines yet.</div>';
+      groupsContainer.innerHTML = '<div class="empty">No custom protocols apply today. Weekly/monthly/seasonal practices surface on their scheduled days.</div>';
     } else {
       const byCategory = new Map();
       ordinaryDisciplines.forEach(disc => {
@@ -3204,8 +3264,8 @@ function renderCommandBrief() {
   // Discipline status
   const discContainer = document.getElementById('briefDisciplines');
   if (discContainer) {
-    const disciplines = Array.isArray(state.disciplines) ? state.disciplines : [];
-    discContainer.innerHTML = disciplines.map(disc => {
+    const disciplines = (Array.isArray(state.disciplines) ? state.disciplines : []).filter(disciplineAppliesToday);
+    discContainer.innerHTML = disciplines.length ? disciplines.map(disc => {
       const todayLog = state.disciplineLog.find(e => e.disciplineId === disc.id && e.date === today);
       const done = !!todayLog;
       const postedXP = todayLog && todayLog.postedXP !== undefined
@@ -3223,7 +3283,7 @@ function renderCommandBrief() {
         </span>
         ${done ? `<span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--cyan);">+${postedXP.toLocaleString()}</span>` : ''}
       </div>`;
-    }).join('');
+    }).join('') : '<div class="empty" style="padding:10px;">No protocols scheduled for today.</div>';
   }
 
   // Pipeline snapshot
@@ -3477,10 +3537,24 @@ function renderTitles() {
     SSS: 'rgba(201,168,76,.12)'
   };
 
-  container.innerHTML = tiers.map(tier => {
+  const currentRankIndex = tiers.indexOf(state.identity.tier);
+
+  // Pinned starter title: "Awakened" is auto-awarded to every operator and rendered
+  // with an illuminated treatment, outside the tier ladder.
+  const awakenedActive = activeTitle === "Awakened";
+  const awakenedCard = `<div class="title-card title-card--awakened${awakenedActive ? ' is-active' : ''}"
+      data-action="set-title" data-title="Awakened">
+      <div class="title-card__name">${awakenedActive ? '▶ ' : ''}Awakened</div>
+      <div class="title-card__status">${awakenedActive ? 'ACTIVE' : 'EARNED // The first light'}</div>
+    </div>`;
+  const starterGroup = `<details class="title-tier" open>
+      <summary><span class="title-tier__label" style="color:var(--gold);">STARTER</span><span class="title-tier__rule"></span></summary>
+      <div class="title-tier__grid">${awakenedCard}</div>
+    </details>`;
+
+  const tierGroups = tiers.map(tier => {
     const titles = RANK_CONFIG.titles[tier] || [];
     const color = tierColor[tier] || 'var(--text-muted)';
-    const currentRankIndex = tiers.indexOf(state.identity.tier);
     const tierIndex = tiers.indexOf(tier);
 
     const titleCards = titles.map(title => {
@@ -3521,16 +3595,22 @@ function renderTitles() {
       </div>`;
     }).join('');
 
-    return `<div style="margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-        <span style="color:${color};font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;">${tier}-TIER</span>
-        <span style="flex:1;height:1px;background:var(--line-soft);"></span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">
+    const earnedInTier = titles.filter(t => earned.includes(t)).length;
+    // Open the current rank's tier by default; collapse the rest.
+    const openAttr = tierIndex === currentRankIndex ? ' open' : '';
+    return `<details class="title-tier"${openAttr}>
+      <summary>
+        <span class="title-tier__label" style="color:${color};">${tier}-TIER</span>
+        <span class="title-tier__rule"></span>
+        <span class="title-tier__count">${earnedInTier}/${titles.length}</span>
+      </summary>
+      <div class="title-tier__grid">
         ${titleCards}
       </div>
-    </div>`;
+    </details>`;
   }).join('');
+
+  container.innerHTML = starterGroup + tierGroups;
 }
 
 function setActiveTitle(title) {
@@ -3587,10 +3667,150 @@ function renderIdentity() {
   els.identityArchetype.textContent = 'Archetype: ' + (id.archetype || 'Unset');
   els.identityTier.textContent = String(id.tier || 'E');
   els.identityFaith.textContent = 'Faith: ' + (id.faith || '#FAITH#');
+
+  const days = Number(state.daysTracked) || 0;
+  const cycleDay = id.cycleDay || days + 1;
+  const mult = compound();
+  const tracked = isTrackedToday();
+
+  // Cycle card: the operating cadence, plain-language.
   const cycleEl = document.getElementById('identityCycle');
   const trackingEl = document.getElementById('identityTracking');
-  if (cycleEl) cycleEl.textContent = 'Day ' + (id.cycleDay || state.daysTracked + 1 || '---');
-  if (trackingEl) trackingEl.textContent = 'Tracking: ' + (id.trackingActive ? 'Active' : 'Passive');
+  if (cycleEl) cycleEl.textContent = 'Day ' + cycleDay;
+  if (trackingEl) trackingEl.textContent = tracked ? 'Today: Tracked ✓' : 'Today: Not yet tracked';
+
+  // Days Tracked card.
+  const daysEl = document.getElementById('identityDays');
+  const daysMetaEl = document.getElementById('identityDaysMeta');
+  if (daysEl) daysEl.textContent = days.toLocaleString();
+  if (daysMetaEl) daysMetaEl.textContent = days === 1 ? '1 intentional day banked' : `${days.toLocaleString()} intentional days banked`;
+
+  // Compound Growth card.
+  const compEl = document.getElementById('identityCompound');
+  const compMetaEl = document.getElementById('identityCompoundMeta');
+  if (compEl) compEl.textContent = mult.toFixed(2) + 'x';
+  if (compMetaEl) compMetaEl.textContent = '+1% per tracked day, compounding';
+}
+
+// --- Local skill-suggestion heuristic -------------------------------------
+// Browser-only "AI": keyword rules map a skill name to a starting archetype
+// (category), tier, XP and tags. Mirrors the resume-extraction keyword approach.
+// No network, no keys. Suggestions are always user-editable.
+const SKILL_CATEGORIES = ['Business / Leadership', 'Technical / Digital', 'Creative / Arts', 'Physical / Athletic'];
+
+const SKILL_SUGGEST_RULES = [
+  { category: 'Technical / Digital', tier: 'acquiring', kw: ['code', 'coding', 'program', 'developer', 'software', 'javascript', 'python', 'java', 'typescript', 'react', 'web', 'app', 'data', 'analytics', 'sql', 'ai', 'prompt', 'automation', 'cloud', 'aws', 'devops', 'engineer', 'cyber', 'security', 'it ', 'network', 'database'] },
+  { category: 'Business / Leadership', tier: 'beginner', kw: ['sales', 'negotiat', 'marketing', 'strategy', 'leadership', 'management', 'manager', 'finance', 'account', 'operations', 'product', 'founder', 'business', 'consult', 'recruit', 'hr', 'project', 'analyst', 'real estate'] },
+  { category: 'Creative / Arts', tier: 'beginner', kw: ['design', 'art', 'visual', 'video', 'film', 'photo', 'write', 'writing', 'content', 'music', 'illustrat', 'brand', 'ux', 'ui', 'animation', 'creative', 'editor', 'edit'] },
+  { category: 'Physical / Athletic', tier: 'beginner', kw: ['strength', 'fitness', 'condition', 'cardio', 'endurance', 'wrestl', 'jiu', 'bjj', 'box', 'martial', 'swim', 'run', 'lift', 'sport', 'athlet', 'yoga', 'mobility', 'climb'] }
+];
+
+function suggestSkillMeta(name) {
+  const lower = String(name || '').toLowerCase();
+  let match = null;
+  if (lower.trim()) {
+    match = SKILL_SUGGEST_RULES.find(rule => rule.kw.some(k => lower.includes(k)));
+  }
+  const category = match ? match.category : 'Business / Leadership';
+  const tier = match ? match.tier : 'acquiring';
+  const defaults = TIER_XP_DEFAULTS[tier] || TIER_XP_DEFAULTS.acquiring;
+  return { category, tier, xp: defaults.xp, xpMax: defaults.xpMax };
+}
+
+// Career presets: choosing one seeds a starter registry. Tiers/XP are suggestions
+// the operator can adjust afterward via "Adjust XP".
+const CAREER_PRESETS = {
+  'Software Engineer': [
+    { name: 'Web / App Building', category: 'Technical / Digital', tier: 'proficient', tags: ['HTML/CSS', 'JavaScript', 'APIs'] },
+    { name: 'Data & Analytics', category: 'Technical / Digital', tier: 'acquiring', tags: ['SQL', 'Dashboards'] },
+    { name: 'AI Tools & Prompting', category: 'Technical / Digital', tier: 'acquiring', tags: ['Prompting', 'Workflow AI'] },
+    { name: 'Strategy & Vision', category: 'Business / Leadership', tier: 'acquiring', tags: ['Systems Thinking'] }
+  ],
+  'Sales / Business': [
+    { name: 'Sales & Negotiation', category: 'Business / Leadership', tier: 'proficient', tags: ['Closing', 'Persuasion'] },
+    { name: 'Strategy & Vision', category: 'Business / Leadership', tier: 'acquiring', tags: ['Macro Planning'] },
+    { name: 'Marketing', category: 'Business / Leadership', tier: 'acquiring', tags: ['Funnels', 'Positioning'] },
+    { name: 'Data & Analytics', category: 'Technical / Digital', tier: 'acquiring', tags: ['Metrics'] }
+  ],
+  'Creative / Designer': [
+    { name: 'Design & Visual', category: 'Creative / Arts', tier: 'proficient', tags: ['Visual Identity', 'Composition'] },
+    { name: 'Video & Film', category: 'Creative / Arts', tier: 'acquiring', tags: ['Editing', 'Storytelling'] },
+    { name: 'Content & Writing', category: 'Creative / Arts', tier: 'acquiring', tags: ['Copy', 'Narrative'] },
+    { name: 'AI Tools & Prompting', category: 'Technical / Digital', tier: 'acquiring', tags: ['Generative AI'] }
+  ],
+  'Athlete / Physical': [
+    { name: 'Strength & Conditioning', category: 'Physical / Athletic', tier: 'proficient', tags: ['Programming', 'Recovery'] },
+    { name: 'Endurance / Cardio', category: 'Physical / Athletic', tier: 'acquiring', tags: ['Zone 2', 'Pacing'] },
+    { name: 'Mobility / Flexibility', category: 'Physical / Athletic', tier: 'acquiring', tags: ['Range', 'Prehab'] }
+  ],
+  'Healthcare': [
+    { name: 'Clinical Practice', category: 'Technical / Digital', tier: 'beginner', tags: ['Patient Care'] },
+    { name: 'Pharmacology', category: 'Technical / Digital', tier: 'acquiring', tags: ['Medication'] },
+    { name: 'Operations', category: 'Business / Leadership', tier: 'acquiring', tags: ['Workflow', 'Compliance'] }
+  ],
+  'Trades / Skilled Labor': [
+    { name: 'Core Trade Craft', category: 'Physical / Athletic', tier: 'beginner', tags: ['Hands-on'] },
+    { name: 'Safety & Compliance', category: 'Business / Leadership', tier: 'acquiring', tags: ['Standards'] },
+    { name: 'Estimating / Bidding', category: 'Business / Leadership', tier: 'acquiring', tags: ['Quotes'] }
+  ]
+};
+
+function applyCareerPreset(careerKey) {
+  const preset = CAREER_PRESETS[careerKey];
+  if (!preset) return;
+  if (!Array.isArray(state.skills)) state.skills = [];
+  let added = 0;
+  preset.forEach(item => {
+    const exists = state.skills.some(s => String(s.name || '').toLowerCase() === item.name.toLowerCase());
+    if (exists) return;
+    const defaults = TIER_XP_DEFAULTS[item.tier] || TIER_XP_DEFAULTS.acquiring;
+    state.skills.push({
+      id: 'sk-' + Date.now() + '-' + added,
+      name: item.name,
+      category: item.category,
+      tier: item.tier,
+      xp: defaults.xp,
+      xpMax: defaults.xpMax,
+      tags: item.tags || []
+    });
+    added++;
+  });
+  saveState();
+  renderAll();
+  showToast(added ? `${careerKey} preset added // ${added} skills` : 'Those skills already exist');
+}
+
+function skillsOnboardingHTML() {
+  const careerOptions = Object.keys(CAREER_PRESETS)
+    .map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
+  return `
+  <div class="skill-onboard" style="grid-column:1/-1;">
+    <div class="skill-onboard__head">
+      <div class="skill-onboard__title">Build your Skill Registry</div>
+      <div class="skill-onboard__copy">KAIRU starts empty. Seed your capabilities one of three ways — KAIRU suggests a starting archetype, tier and XP, and you can fine-tune anything after.</div>
+    </div>
+    <div class="skill-onboard__grid">
+      <div class="skill-onboard__card">
+        <div class="skill-onboard__num">01</div>
+        <div class="skill-onboard__name">Extract from Resume</div>
+        <div class="skill-onboard__desc">Paste your resume below and KAIRU pulls draft skills to approve.</div>
+        <button class="btn cyan" type="button" data-action="onboard-resume" style="width:100%;justify-content:center;">Go to Resume Import</button>
+      </div>
+      <div class="skill-onboard__card">
+        <div class="skill-onboard__num">02</div>
+        <div class="skill-onboard__name">Pick a Career</div>
+        <div class="skill-onboard__desc">Choose a path and KAIRU seeds a suggested starter set.</div>
+        <select id="careerPresetSelect" class="skill-onboard__select">${careerOptions}</select>
+        <button class="btn cyan" type="button" data-action="apply-career" style="width:100%;justify-content:center;margin-top:8px;">Seed These Skills</button>
+      </div>
+      <div class="skill-onboard__card">
+        <div class="skill-onboard__num">03</div>
+        <div class="skill-onboard__name">Create Manually</div>
+        <div class="skill-onboard__desc">Add a single skill — type a name and KAIRU pre-fills the rest.</div>
+        <button class="btn primary" type="button" data-action="open-skill" style="width:100%;justify-content:center;">Add a Skill</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderSkills() {
@@ -3598,7 +3818,7 @@ function renderSkills() {
   if (!container) return;
   const skills = Array.isArray(state.skills) ? state.skills : [];
   if (!skills.length) {
-    container.innerHTML = '<div class="empty">No skills registered.</div>';
+    container.innerHTML = skillsOnboardingHTML();
     return;
   }
 
@@ -3728,7 +3948,12 @@ function saveIdentity() {
   showToast("Identity committed");
 }
 
+// Tracks whether the operator has hand-edited the skill meta fields; while false,
+// the heuristic is allowed to keep refining suggestions as they type the name.
+let skillMetaTouched = false;
+
 function openSkill() {
+  skillMetaTouched = false;
   document.getElementById('skillNameInput').value = '';
   document.getElementById('skillCategoryInput').value = 'Business / Leadership';
   document.getElementById('skillTierInput').value = 'acquiring';
@@ -3859,6 +4084,19 @@ document.addEventListener("click", (event) => {
   if (action === "open-coach-export") openCoachExport();
   if (action === "close-coach-export") closeCoachExport();
   if (action === "copy-coach-export") copyCoachExport();
+  // Mobile navigation + skill onboarding
+  if (action === "goview") setView(actionTarget.dataset.view);
+  if (action === "open-more") openMore();
+  if (action === "close-more") closeMore();
+  if (action === "apply-career") {
+    const sel = document.getElementById("careerPresetSelect");
+    if (sel) applyCareerPreset(sel.value);
+  }
+  if (action === "onboard-resume") {
+    setView("skills");
+    const ta = document.getElementById("resumeTextInput");
+    if (ta) { ta.scrollIntoView({ behavior: "smooth", block: "center" }); window.setTimeout(() => ta.focus(), 200); }
+  }
 });
 
 document.addEventListener("change", (event) => {
@@ -3891,6 +4129,25 @@ $$(".tab").forEach((tab) => {
   document.getElementById(id).addEventListener('change', syncXP);
   document.getElementById(id).addEventListener('input', syncXP);
 });
+
+// Skill modal: local heuristic suggests archetype (category), tier and starting XP
+// from the skill name. Stops auto-suggesting once the operator edits a meta field.
+(function wireSkillSuggest() {
+  const nameEl = document.getElementById('skillNameInput');
+  const catEl = document.getElementById('skillCategoryInput');
+  const tierEl = document.getElementById('skillTierInput');
+  const xpEl = document.getElementById('skillXPInput');
+  if (!nameEl || !catEl || !tierEl || !xpEl) return;
+
+  nameEl.addEventListener('input', () => {
+    if (skillMetaTouched) return;
+    const meta = suggestSkillMeta(nameEl.value);
+    catEl.value = meta.category;
+    tierEl.value = meta.tier;
+    xpEl.value = meta.xp;
+  });
+  [catEl, tierEl, xpEl].forEach(el => el.addEventListener('change', () => { skillMetaTouched = true; }));
+})();
 
 // One-time migration from old storage key
 (function migrateStorage() {
@@ -3977,11 +4234,33 @@ $$(".tab").forEach((tab) => {
   }
 })();
 
+// One-time migration: KAIRU now ships with an empty Skill Registry and onboards
+// each operator. This clears the previously seeded personal skills from the saved
+// vault exactly once (skills only — quests, XP, finance, disciplines untouched).
+(function clearSeededSkills() {
+  if (localStorage.getItem('kairu_skills_cleared_v1') === 'true') return;
+  [STORAGE_KEY, LEGACY_STORAGE_KEY].forEach(key => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object') {
+        saved.skills = [];
+        localStorage.setItem(key, JSON.stringify(saved));
+      }
+    } catch (err) {
+      console.warn('Skill clear skipped for', key, err);
+    }
+  });
+  localStorage.setItem('kairu_skills_cleared_v1', 'true');
+})();
+
 loadState();
 maybeBacklogEcho(); // Echo: flag a high quest backlog on load (no XP awarded)
 maybeTaskBacklogEcho(); // Echo: flag high task backlog on load (no XP awarded)
 saveState();
 renderAll();
+setView('command'); // Command Center is the default landing view (syncs bottom nav)
 console.log('KAIRU CONTEXT', assembleContext());
 renderClock();
 window.setInterval(renderClock, 1000);

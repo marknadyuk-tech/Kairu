@@ -2027,3 +2027,233 @@ body.sanctuary-active .app {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   KAIRU Product Pass — bottom nav, tracking lock, identity,
+   collapsible titles/rank, skill onboarding
+   ============================================================ */
+
+/* --- Tracking locked state --- */
+/* The [hidden] attribute is otherwise overridden by .btn/.track-locked display
+   rules (class specificity beats the UA [hidden] rule), so enforce it explicitly. */
+.btn[hidden] { display: none !important; }
+.track-locked[hidden] { display: none !important; }
+.track-panel.locked {
+  border-color: rgba(0, 229, 255, 0.35);
+  box-shadow: var(--cyan-glow);
+  background: linear-gradient(90deg, var(--cyan-soft), transparent);
+}
+.track-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid rgba(0, 229, 255, 0.45);
+  border-radius: 10px;
+  background: var(--cyan-soft);
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  cursor: default;
+  user-select: none;
+}
+.track-locked__lock { font-size: 16px; filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.6)); }
+.track-locked__text b { color: var(--text); font-weight: 600; }
+
+/* --- Ascension Rank prominence + collapsible requirements --- */
+.panel--ascension {
+  border-color: rgba(255, 179, 0, 0.28);
+  background: linear-gradient(180deg, var(--gold-soft), transparent);
+}
+.panel--ascension .rank-pill {
+  font-size: 16px;
+  padding: 6px 16px;
+  box-shadow: var(--gold-glow);
+}
+.rank-gates-wrap { margin-top: 12px; }
+.rank-gates-wrap > summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rank-gates-wrap > summary::-webkit-details-marker { display: none; }
+.rank-gates-wrap > summary::before { content: "▸"; color: var(--gold); transition: transform 0.2s; }
+.rank-gates-wrap[open] > summary::before { transform: rotate(90deg); }
+
+/* --- Collapsible title tiers + illuminated Awakened --- */
+.title-tier { margin-bottom: 10px; border-bottom: 1px solid var(--line-soft); padding-bottom: 8px; }
+.title-tier > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+.title-tier > summary::-webkit-details-marker { display: none; }
+.title-tier__label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; }
+.title-tier__rule { flex: 1; height: 1px; background: var(--line-soft); }
+.title-tier__count { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+.title-tier__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  padding: 6px 0 4px;
+}
+.title-card {
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.title-card__name { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.title-card__status { font-size: 10px; color: var(--text-dim); margin-top: 3px; font-family: var(--mono); }
+.title-card--awakened {
+  cursor: pointer;
+  border-color: var(--gold);
+  background: radial-gradient(120% 120% at 0% 0%, var(--gold-soft), transparent 70%);
+  box-shadow: var(--gold-glow);
+  animation: awakenedPulse 3.4s ease-in-out infinite;
+}
+.title-card--awakened .title-card__name { color: var(--gold); }
+@keyframes awakenedPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(255, 179, 0, 0.25); }
+  50% { box-shadow: 0 0 26px rgba(255, 179, 0, 0.5); }
+}
+
+/* --- Skill onboarding empty state --- */
+.skill-onboard {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px;
+  background: var(--surface-2);
+}
+.skill-onboard__title { font-family: var(--display); font-size: 20px; color: var(--text); }
+.skill-onboard__copy { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin-top: 6px; max-width: 60ch; }
+.skill-onboard__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+.skill-onboard__card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skill-onboard__num { font-family: var(--mono); font-size: 11px; color: var(--gold); letter-spacing: 0.18em; }
+.skill-onboard__name { font-size: 16px; color: var(--text); }
+.skill-onboard__desc { font-size: 12px; color: var(--text-muted); line-height: 1.45; flex: 1; }
+.skill-onboard__select {
+  width: 100%;
+  background: var(--surface-3);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* --- Bottom navigation (mobile) + More sheet --- */
+.bottom-nav { display: none; }
+.more-sheet { display: none; }
+
+@media (max-width: 960px) {
+  /* Remove the top tab navigation entirely on mobile (replaced by bottom nav). */
+  .sidebar .nav { display: none; }
+
+  .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90;
+    background: var(--surface-glass);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .bottom-nav__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 4px;
+    background: transparent;
+    border: 0;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    cursor: pointer;
+    min-height: 56px;
+  }
+  .bottom-nav__icon { font-size: 16px; line-height: 1; }
+  .bottom-nav__label { font-size: 10px; letter-spacing: 0.06em; }
+  .bottom-nav__item.active { color: var(--cyan); }
+  .bottom-nav__item.active .bottom-nav__icon { filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.6)); }
+
+  /* Clear space so fixed bottom nav never covers content. */
+  .main { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+
+  .more-sheet {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 95;
+    background: rgba(3, 5, 8, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .more-sheet.open { opacity: 1; pointer-events: auto; }
+  .more-sheet__panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--surface-2);
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    padding: 18px 18px calc(24px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+  }
+  .more-sheet.open .more-sheet__panel { transform: translateY(0); }
+  .more-sheet__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .more-sheet__title { font-family: var(--display); font-size: 20px; color: var(--text); }
+  .more-sheet__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .more-sheet__link {
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .more-sheet__link b { font-size: 15px; }
+  .more-sheet__link span { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+  .more-sheet__utils { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .more-sheet__utils .btn { flex: 1; justify-content: center; }
+}

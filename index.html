@@ -162,6 +162,10 @@
             <p class="track-copy" id="trackCopy">Lock in today to activate the +3% XP boost on all completions before midnight.</p>
           </div>
           <button class="btn cyan" type="button" data-action="track">Track Today</button>
+          <div class="track-locked" id="trackLocked" role="status" aria-live="polite" hidden>
+            <span class="track-locked__lock" aria-hidden="true">&#128274;</span>
+            <span class="track-locked__text">Tracked<br><b>Locked until midnight</b></span>
+          </div>
         </div>
       </div>
 
@@ -271,22 +275,35 @@
           </article>
           <article class="card identity-card">
             <div class="label">Cycle</div>
-            <div class="value" id="identityCycle">Day 1 of 1</div>
-            <div class="card__meta" id="identityTracking">Tracking: Passive</div>
+            <div class="value" id="identityCycle">Day 1</div>
+            <div class="card__meta" id="identityTracking">Today: Not yet tracked</div>
+          </article>
+          <article class="card identity-card">
+            <div class="label">Days Tracked</div>
+            <div class="value cyan" id="identityDays">0</div>
+            <div class="card__meta" id="identityDaysMeta">0 intentional days banked</div>
+          </article>
+          <article class="card identity-card">
+            <div class="label">Compound Growth</div>
+            <div class="value gold" id="identityCompound">1.00x</div>
+            <div class="card__meta" id="identityCompoundMeta">+1% per tracked day, compounding</div>
           </article>
         </div>
       </section>
-<section class="panel">
+<section class="panel panel--ascension">
           <div class="panel__top">
             <div>
               <h3 class="panel__title">Ascension Rank</h3>
               <p class="panel__copy">The E&rarr;SSS ladder. Time-in-grade, quest tiers, discipline streak and credentials are the binding gates; XP is a soft signal.</p>
             </div>
-            <span class="pill legendary" id="rankName">E</span>
+            <span class="pill legendary rank-pill" id="rankName">E</span>
           </div>
           <div class="progress" aria-label="Rank progress"><span id="rankProgress"></span></div>
           <div class="rank-row"><span id="rankCurrent">E-Rank</span><span id="rankNext">Next D · 0/5 gates</span></div>
-          <div class="rank-gates" id="rankGates"></div>
+          <details class="rank-gates-wrap">
+            <summary>Rank requirements</summary>
+            <div class="rank-gates" id="rankGates"></div>
+          </details>
           <button class="btn primary rank-ascend" type="button" id="ascendBtn" data-action="ascend" hidden>Ascend Rank</button>
         </section>
 
@@ -500,7 +517,7 @@
         <div class="section-head">
           <div>
             <h3 class="section-title">Skill Registry</h3>
-            <p class="section-note">15 skills across 4 categories. XP bars show progress to tier ceiling.</p>
+            <p class="section-note">Your capabilities across categories. XP bars show progress to tier ceiling.</p>
           </div>
           <button class="btn primary" type="button" data-action="open-skill"><span class="btn__icon">+</span>Add Skill</button>
         </div>
@@ -552,6 +569,45 @@
 
     <p class="system-note">KAIRU // Codex UIUX Remix // LocalStorage Persistence Live</p>
   </main>
+</div>
+
+<!-- Mobile-first bottom navigation: primary actions within thumb reach. Hidden on desktop (sidebar nav preserved). -->
+<nav class="bottom-nav" aria-label="Primary navigation">
+  <button class="bottom-nav__item active" type="button" data-action="goview" data-view="command">
+    <span class="bottom-nav__icon">&#9632;</span><span class="bottom-nav__label">Command</span>
+  </button>
+  <button class="bottom-nav__item" type="button" data-action="goview" data-view="quests">
+    <span class="bottom-nav__icon">&#9670;</span><span class="bottom-nav__label">Quests</span>
+  </button>
+  <button class="bottom-nav__item" type="button" data-action="goview" data-view="discipline">
+    <span class="bottom-nav__icon">&#9650;</span><span class="bottom-nav__label">Discipline</span>
+  </button>
+  <button class="bottom-nav__item" type="button" data-action="goview" data-view="skills">
+    <span class="bottom-nav__icon">&#9679;</span><span class="bottom-nav__label">Skills</span>
+  </button>
+  <button class="bottom-nav__item" type="button" data-action="open-more">
+    <span class="bottom-nav__icon">&#8943;</span><span class="bottom-nav__label">More</span>
+  </button>
+</nav>
+
+<div class="more-sheet" id="moreSheet" role="dialog" aria-modal="true" aria-label="More destinations">
+  <div class="more-sheet__panel">
+    <div class="more-sheet__head">
+      <h2 class="more-sheet__title">More</h2>
+      <button class="btn ghost" type="button" data-action="close-more">Close</button>
+    </div>
+    <div class="more-sheet__grid">
+      <button class="more-sheet__link" type="button" data-action="goview" data-view="tasks"><b>Tasks</b><span>Maintenance</span></button>
+      <button class="more-sheet__link" type="button" data-action="goview" data-view="pipeline"><b>Pipeline</b><span>Opportunity tracker</span></button>
+      <button class="more-sheet__link" type="button" data-action="goview" data-view="financial"><b>Financial</b><span>Net position</span></button>
+      <button class="more-sheet__link" type="button" data-action="goview" data-view="archive"><b>Chronicle</b><span>Deep history</span></button>
+    </div>
+    <div class="more-sheet__utils">
+      <button class="btn ghost" type="button" data-action="export-backup">Export Backup</button>
+      <button class="btn ghost" type="button" data-action="import-backup">Import Backup</button>
+      <button class="btn ghost danger" type="button" data-action="reset">Reset State</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-bg" id="questModal" role="dialog" aria-modal="true" aria-labelledby="questModalTitle">
@@ -730,8 +786,11 @@
         Frequency
         <select id="disciplineFrequencyInput">
           <option value="daily">Daily</option>
-          <option value="4x/week">4x/week</option>
           <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="seasonal">Seasonal (every 3 months)</option>
+          <option value="annual">Annual</option>
+          <option value="4x/week">4x/week</option>
           <option value="custom">Custom</option>
         </select>
       </label>
