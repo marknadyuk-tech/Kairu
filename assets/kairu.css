@@ -102,7 +102,47 @@ textarea:focus-visible {
 .brand__head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 14px;
+}
+
+.brand__id {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Persistent rank HUD in the header — opposite the logo/name. */
+.brand__rank {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.brand__rank-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.brand__rank-value {
+  font-family: var(--display);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgba(0, 229, 255, 0.45);
+  margin-top: 2px;
+}
+.brand__rank-cxp {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  margin-top: 4px;
 }
 
 .kairu-logo {
@@ -1939,17 +1979,11 @@ body.sanctuary-active .app {
     display: none;
   }
 
+  /* The footer's controls (Chronicle, Local Storage, Export/Import/Reset) are
+     redundant on mobile — they live in the More sheet. Hide the panel, keep DOM
+     (the hidden file input still works via programmatic click). */
   .sidebar__footer {
-    margin-top: 20px;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 14px;
-    background: rgba(10, 13, 20, 0.4);
-    border: 1px solid var(--line);
-    border-radius: 10px;
+    display: none;
   }
 
   .sidebar__footer .tab--chronicle {

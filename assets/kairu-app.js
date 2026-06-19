@@ -1199,6 +1199,12 @@ function renderRank() {
   const ev = evaluateRankProgress(state);
   const title = state.activeTitle ? ` · ${state.activeTitle}` : "";
 
+  // Persistent header HUD: rank letter + competence XP, visible app-wide.
+  const brandRankValue = document.getElementById('brandRankValue');
+  if (brandRankValue) brandRankValue.textContent = state.identity.tier;
+  const brandRankCXP = document.getElementById('brandRankCXP');
+  if (brandRankCXP) brandRankCXP.textContent = getCompetenceXP().toLocaleString() + ' CXP';
+
   els.rankName.textContent = state.identity.tier;
   els.rankProgress.style.width = `${ev.progress}%`;
   els.rankCurrent.textContent = `${state.identity.tier}-Rank${title}`;
