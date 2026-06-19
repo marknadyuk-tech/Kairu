@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="kairu-logo.png">
+<title>KAIRU</title>
+<link rel="stylesheet" href="assets/kairu.css">
+</head>
+<body>
+<div class="boot" id="boot">
+  <div class="boot__inner">
+    <div class="boot__mark">KAIRU</div>
+    <div class="boot__copy">KAIRU World Initializing.</div>
+    <div class="boot__bar"><span></span></div>
+    <div class="boot__compound" id="bootCompound">Compound Multiplier: 1.00x</div>
+  </div>
+</div>
+
+<section class="sanctuary" id="sanctuary" aria-label="KAIRU Sanctuary" hidden>
+  <div class="sanctuary__motes" aria-hidden="true">
+    <span class="sanctuary__mote"></span>
+    <span class="sanctuary__mote"></span>
+    <span class="sanctuary__mote"></span>
+    <span class="sanctuary__mote"></span>
+  </div>
+  <div class="sanctuary__shell">
+    <div class="sanctuary__hero">
+      <div class="sanctuary__brand">KAIRU Sanctuary</div>
+      <h1 class="sanctuary__title">Welcome back, Mark.</h1>
+      <p class="sanctuary__copy">The world persisted while you slept. Step in deliberately.</p>
+      <div class="sanctuary__identity" id="sanctuaryIdentityLine">Archetype: Operator // Faith: #FAITH# // Cycle Day 1</div>
+      <div class="sanctuary__cards" aria-label="World State">
+        <article class="sanctuary-card">
+          <span>Active Quests</span>
+          <b id="sanctuaryActiveQuests">0</b>
+        </article>
+        <article class="sanctuary-card">
+          <span>Tracked Days</span>
+          <b id="sanctuaryTrackedDays">0</b>
+        </article>
+        <article class="sanctuary-card">
+          <span>Compound Growth</span>
+          <b id="sanctuaryCompound">1.00x</b>
+        </article>
+        <article class="sanctuary-card">
+          <span>XP Available Today</span>
+          <b id="sanctuaryAvailableXP">+0</b>
+        </article>
+      </div>
+      <div class="sanctuary__actions">
+        <button class="btn primary" type="button" data-action="dismiss-sanctuary">Begin Day</button>
+        <button class="btn ghost" type="button" data-action="dismiss-sanctuary">Enter Command Center</button>
+      </div>
+    </div>
+    <aside class="sanctuary__side" aria-label="Today's Call">
+      <h2 class="sanctuary__side-title">Today's Call</h2>
+      <div class="sanctuary__recommend">
+        <span>Recommended Action</span>
+        <b id="sanctuaryRecommended">Morning Prayer</b>
+      </div>
+      <span class="sanctuary__call-label" style="margin-top:22px;">Signals</span>
+      <ol class="sanctuary__call" id="sanctuaryCallList"></ol>
+    </aside>
+  </div>
+</section>
+
+<div class="app">
+  <aside class="sidebar" aria-label="Primary navigation">
+    <div class="brand">
+      <div class="brand__head">
+        <img src="kairu-logo.png" alt="KAIRU Logo" class="kairu-logo">
+        <h1 class="brand__mark">KAIRU</h1>
+      </div>
+      <div class="brand__sub">Phase 2 Active // Command Center</div>
+    </div>
+
+    <nav class="nav">
+      <button class="tab active" type="button" data-view="command">
+        <span class="tab__icon">01</span>
+        <span class="tab__text">
+          <span class="tab__label">Command</span>
+          <span class="tab__hint">War room</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="quests">
+        <span class="tab__icon">02</span>
+        <span class="tab__text">
+          <span class="tab__label">Quests</span>
+          <span class="tab__hint">Active board</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="discipline">
+        <span class="tab__icon">03</span>
+        <span class="tab__text">
+          <span class="tab__label">Discipline</span>
+          <span class="tab__hint">Daily stack</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="tasks">
+        <span class="tab__icon">TK</span>
+        <span class="tab__text">
+          <span class="tab__label">Tasks</span>
+          <span class="tab__hint">Maintenance</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="pipeline">
+        <span class="tab__icon">04</span>
+        <span class="tab__text">
+          <span class="tab__label">Pipeline</span>
+          <span class="tab__hint">Opportunity tracker</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="skills">
+        <span class="tab__icon">05</span>
+        <span class="tab__text">
+          <span class="tab__label">Skills</span>
+          <span class="tab__hint">Registry</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="financial">
+        <span class="tab__icon">06</span>
+        <span class="tab__text">
+          <span class="tab__label">Financial</span>
+          <span class="tab__hint">Net position</span>
+        </span>
+      </button>
+    </nav>
+
+    <div class="sidebar__footer">
+      <button class="tab tab--chronicle" type="button" data-view="archive">
+        <span class="tab__icon">CH</span>
+        <span class="tab__text">
+          <span class="tab__label">Chronicle</span>
+          <span class="tab__hint">Deep history</span>
+        </span>
+      </button>
+      <div class="status-chip"><span>Local Storage</span><span class="status-dot" aria-hidden="true"></span></div>
+      <button class="btn ghost" type="button" data-action="export-backup">Export Backup</button>
+      <button class="btn ghost" type="button" data-action="import-backup">Import Backup</button>
+      <input type="file" id="importFileInput" accept="application/json,.json" hidden>
+      <button class="btn ghost danger" type="button" data-action="reset">Reset State</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow" id="viewEyebrow">KAIRU Command</p>
+        <h2 class="page-title" id="viewTitle">Command Center</h2>
+        <p class="page-copy" id="viewCopy">Track today, complete one quest, bank the XP, and keep the loop alive through reload.</p>
+      </div>
+      <div class="clock" id="clock" aria-live="polite"></div>
+    </header>
+
+    <section class="view active" id="command" aria-label="Command dashboard">
+      <div class="section">
+        <div class="track-panel" id="trackPanel">
+          <div>
+            <div class="track-kicker" id="trackKicker">Daily Tracking</div>
+            <h3 class="track-title" id="trackTitle">Intentional tracking inactive</h3>
+            <p class="track-copy" id="trackCopy">Lock in today to activate the +3% XP boost on all completions before midnight.</p>
+          </div>
+          <button class="btn cyan" type="button" data-action="track">Track Today</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="grid metrics">
+          <article class="card card--primary">
+            <div class="card__label">Primary Focus // Competence XP</div>
+            <div class="card__value gold" id="metricCXP">0</div>
+            <div class="card__meta">Completed quest output // Doc 10 before caps</div>
+            <div class="card__meta" id="dailyXPStatus" style="margin-top:6px;font-family:var(--mono);">XP TODAY: 0 / 300 prime band open</div>
+          </article>
+          <article class="card">
+            <div class="card__label">Daily Readiness</div>
+            <div class="card__value cyan" id="metricReadiness">0%</div>
+            <div class="card__meta" id="metricOpenLoops">0 open loops</div>
+            <div class="card__meta" id="metricReadinessWarn" style="margin-top:6px;color:var(--red);display:none;"></div>
+          </article>
+          <article class="card">
+            <div class="card__label">Active Quests</div>
+            <div class="card__value" id="metricQuests">0</div>
+            <div class="card__meta" id="metricDue">0 due soon</div>
+          </article>
+          <article class="card">
+            <div class="card__label">Days Tracked</div>
+            <div class="card__value cyan" id="metricDays">0</div>
+            <div class="card__meta">Current operating cycle</div>
+          </article>
+          <article class="card">
+            <div class="card__label">Skill XP</div>
+            <div class="card__value cyan" id="metricKXP">0</div>
+            <div class="card__meta">Capability growth</div>
+          </article>
+          <article class="card">
+            <div class="card__label">Spiritual XP</div>
+            <div class="card__value" id="metricSXP">0</div>
+            <div class="card__meta">Inner-life cultivation</div>
+          </article>
+          <article class="card">
+            <div class="card__label">Total Development Score</div>
+            <div class="card__value green" id="metricTDS">0</div>
+            <div class="card__meta">CXP + KXP + SXP</div>
+          </article>
+          <article class="card">
+            <div class="card__label">Compound X</div>
+            <div class="card__value" id="metricCompound">1.00x</div>
+            <div class="card__meta">1.01 raised by tracked days</div>
+          </article>
+        </div>
+      </div>
+
+      <div class="section" id="commandBriefSection">
+  <div class="section-head">
+    <div>
+      <h3 class="section-title">Today's Brief</h3>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <span style="color:var(--text-dim);font-family:var(--mono);font-size:11px;letter-spacing:.1em;" id="briefXPToday">+0 XP today</span>
+      <button class="btn cyan" type="button" data-action="open-coach-export">Export Coach Brief</button>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px;">
+
+    <div style="display:grid;gap:8px;">
+      <div style="color:var(--text-muted);font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:2px;">Discipline Stack</div>
+      <div id="briefDisciplines" style="display:grid;gap:6px;"></div>
+    </div>
+
+    <div style="display:grid;gap:8px;">
+      <div style="color:var(--text-muted);font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:2px;">Job Pipeline</div>
+      <div id="briefPipeline" style="display:grid;gap:6px;"></div>
+    </div>
+
+  </div>
+</div>
+
+      <div class="section" id="echoSection">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Echo</h3>
+            <p class="section-note">Reflective layer — turns completed action into meaning, pattern, and next step. No XP.</p>
+          </div>
+          <button class="btn ghost" type="button" data-action="open-echo"><span class="btn__icon">+</span>Add Echo</button>
+        </div>
+        <div id="echoList" class="echo-stack"></div>
+      </div>
+
+      <div class="section grid finance-grid">
+      <section class="panel">
+        <div class="panel__top">
+          <div>
+            <h3 class="panel__title">Operator Identity</h3>
+            <p class="panel__copy">Lock the single source of truth for identity fields. Edit inside the app — do not hard-code.</p>
+          </div>
+          <button class="btn ghost" type="button" data-action="open-identity">Edit</button>
+        </div>
+        <div class="grid identity-grid" id="identityGrid">
+          <article class="card identity-card">
+            <div class="label">Operator</div>
+            <div class="value" id="identityName">#NAME#</div>
+            <div class="card__meta" id="identityArchetype">Archetype: Unset</div>
+          </article>
+          <article class="card identity-card">
+            <div class="label">Classification</div>
+            <div class="value cyan" id="identityTier">Initiate</div>
+            <div class="card__meta" id="identityFaith">Faith: #FAITH#</div>
+          </article>
+          <article class="card identity-card">
+            <div class="label">Cycle</div>
+            <div class="value" id="identityCycle">Day 1 of 1</div>
+            <div class="card__meta" id="identityTracking">Tracking: Passive</div>
+          </article>
+        </div>
+      </section>
+<section class="panel">
+          <div class="panel__top">
+            <div>
+              <h3 class="panel__title">Ascension Rank</h3>
+              <p class="panel__copy">The E&rarr;SSS ladder. Time-in-grade, quest tiers, discipline streak and credentials are the binding gates; XP is a soft signal.</p>
+            </div>
+            <span class="pill legendary" id="rankName">E</span>
+          </div>
+          <div class="progress" aria-label="Rank progress"><span id="rankProgress"></span></div>
+          <div class="rank-row"><span id="rankCurrent">E-Rank</span><span id="rankNext">Next D · 0/5 gates</span></div>
+          <div class="rank-gates" id="rankGates"></div>
+          <button class="btn primary rank-ascend" type="button" id="ascendBtn" data-action="ascend" hidden>Ascend Rank</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel__top">
+            <div>
+              <h3 class="panel__title">Net Position</h3>
+              <p class="panel__copy">Snapshot from your local finance inventory.</p>
+            </div>
+            <button class="btn ghost" type="button" data-action="open-fin">Edit</button>
+          </div>
+          <div class="finance-stack">
+            <div class="finance-line good"><span>Net Worth</span><b id="metricNet">$0</b></div>
+            <div class="finance-line info"><span>Monthly Cash Flow</span><b id="metricFlow">$0</b></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="section">
+        <div class="serendipity-indicator" id="serendipityIndicator" hidden>
+          [DIVERGE ACTIVE] 1.5x MULTIPLIER — <span id="serendipityCountdown">--</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <section class="panel">
+          <div class="panel__top">
+            <div>
+              <h3 class="panel__title">Directive</h3>
+              <p class="panel__copy">Prove the loop. One quest. One completion. XP persists through reload. Everything else can layer on top later.</p>
+            </div>
+            <button class="btn primary" type="button" data-action="open-quest"><span class="btn__icon">+</span>New Quest</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">XP Ledger</h3>
+            <p class="section-note">Every XP event logged in sequence. Prime, overflow, and cap events all recorded.</p>
+          </div>
+        </div>
+        <div class="quest-stack" id="xpLogFeed"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Titles Collection</h3>
+            <p class="section-note">Earned titles are unlocked by rank advancement. Tap an earned title to set it as active.</p>
+          </div>
+        </div>
+        <div id="titlesPanel"></div>
+      </div>
+    </section>
+
+    <section class="view" id="quests" aria-label="Quest board">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Active Board</h3>
+            <p class="section-note">Create the next mission, then chronicle completions with optional notes.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-quest"><span class="btn__icon">+</span>New Quest</button>
+        </div>
+        <div class="grid quest-grid">
+          <div class="quest-stack" id="activeList"></div>
+          <section class="panel">
+            <div class="panel__top">
+              <div>
+                <h3 class="panel__title">Board Intel</h3>
+              <p class="panel__copy">Use Doc 10 fields as the required CXP source for new quests.</p>
+              </div>
+            </div>
+            <div class="finance-stack">
+              <div class="finance-line"><span>Due Soon</span><b id="intelDue">0</b></div>
+              <div class="finance-line"><span>Potential CXP</span><b id="intelPotential">0</b></div>
+              <div class="finance-line"><span>Chronicled</span><b id="intelArchived">0</b></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Recently Completed</h3>
+            <p class="section-note">Latest eight completed quests stay visible here.</p>
+          </div>
+        </div>
+        <div class="quest-stack" id="archiveList"></div>
+      </div>
+    </section>
+
+    <section class="view archive-panel" id="archive" aria-label="Chronicle ledger">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Chronicle</h3>
+            <p class="section-note">Full read-only record of completed quests.</p>
+          </div>
+          <button class="btn ghost" type="button" data-action="close-archive">Return</button>
+        </div>
+        <div class="quest-stack" id="fullArchiveList"></div>
+      </div>
+    </section>
+
+    <section class="view" id="financial" aria-label="Financial dashboard">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Inventory & Assets</h3>
+            <p class="section-note">Figures are stored only in this browser.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-fin">Edit Data</button>
+        </div>
+        <div class="grid finance-grid">
+          <div class="finance-stack">
+            <div class="finance-line"><span>Assets</span><b id="financeAssets">$0</b></div>
+            <div class="finance-line"><span>Liabilities</span><b id="financeLiabilities">$0</b></div>
+            <div class="finance-line good"><span>Net Worth</span><b id="financeNet">$0</b></div>
+            <div class="finance-line"><span>Monthly Income</span><b id="financeIncome">$0</b></div>
+            <div class="finance-line"><span>Monthly Expenses</span><b id="financeExpenses">$0</b></div>
+            <div class="finance-line info" id="financeFlowLine"><span>Monthly Cash Flow</span><b id="financeFlow">$0</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="pipeline" aria-label="Job pipeline">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Active Income</h3>
+            <p class="section-note">Variable hourly. Base and extended shift projections.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-income">Edit Income</button>
+        </div>
+        <div class="finance-stack" id="incomeModule"></div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Active Applications</h3>
+            <p class="section-note">Move entries through stages. Offer is the target.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-pipeline"><span class="btn__icon">+</span>Add Entry</button>
+        </div>
+        <div class="grid finance-grid">
+          <div class="quest-stack" id="pipelineList"></div>
+          <section class="panel">
+            <div class="panel__top">
+              <div>
+                <h3 class="panel__title">Stage Count</h3>
+              </div>
+            </div>
+            <div class="finance-stack" id="pipelineCounts"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="discipline" aria-label="Discipline tracker">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Daily Stack</h3>
+            <p class="section-note">Create practices, place them in the day, then log completions against the protocol.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-discipline"><span class="btn__icon">+</span>Add Discipline</button>
+        </div>
+        <section class="panel" style="margin-bottom:18px;">
+          <div class="panel__top">
+            <div>
+              <h3 class="panel__title">This Week</h3>
+              <p class="panel__copy">Each practice across the current week. Cyan = logged, gold ring = today.</p>
+            </div>
+          </div>
+          <div class="disc-week"><div class="disc-week__grid" id="disciplineWeek"></div></div>
+        </section>
+        <div class="grid discipline-grid" style="margin-bottom:18px;">
+          <div style="display:grid;gap:18px;">
+            <section class="panel">
+              <div class="panel__top">
+                <div>
+                  <h3 class="panel__title">Day Protocol</h3>
+                  <p class="panel__copy">Time-blocked practices sorted into a calendar day.</p>
+                </div>
+              </div>
+              <div class="discipline-schedule" id="disciplineSchedule"></div>
+            </section>
+            <div id="disciplineGroups"></div>
+          </div>
+          <details class="panel disc-collapse">
+            <summary>
+              <div>
+                <h3 class="panel__title">Faith / Belief Protocol</h3>
+                <p class="panel__copy">Auto-seeded from Identity and kept separate for clean context.</p>
+              </div>
+            </summary>
+            <div class="grid" style="grid-template-columns:1fr;margin-top:14px;" id="faithDisciplineList"></div>
+          </details>
+        </div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));display:none;" id="disciplineList"></div>
+      </div>
+    </section>
+
+    <section class="view" id="skills" aria-label="Skills registry">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Skill Registry</h3>
+            <p class="section-note">15 skills across 4 categories. XP bars show progress to tier ceiling.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-skill"><span class="btn__icon">+</span>Add Skill</button>
+        </div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));" id="skillsList"></div>
+      </div>
+
+      <div class="section" id="resumeSection">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Resume Import</h3>
+            <p class="section-note">Paste resume text to extract draft skills via keyword matching. Approve drafts into the registry. No XP awarded.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <label>
+            Resume Text
+            <textarea id="resumeTextInput" placeholder="Paste your resume or experience summary here..." style="min-height:120px;"></textarea>
+          </label>
+          <div class="modal-foot" style="justify-content:flex-start;margin-top:0;">
+            <button class="btn cyan" type="button" data-action="extract-resume">Extract Draft Skills</button>
+            <button class="btn ghost" type="button" data-action="clear-resume">Clear</button>
+          </div>
+          <div id="resumeDrafts" style="margin-top:18px;"></div>
+          <div id="resumeSuggestedQuests" style="margin-top:18px;"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="tasks" aria-label="Task board">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Active Tasks</h3>
+            <p class="section-note">Maintenance and upkeep. Completing a task clears an open loop — it never awards XP.</p>
+          </div>
+          <button class="btn primary" type="button" data-action="open-task"><span class="btn__icon">+</span>New Task</button>
+        </div>
+        <div id="taskActiveList" class="task-stack"></div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Completed Tasks</h3>
+          </div>
+        </div>
+        <div id="taskDoneList" class="task-stack"></div>
+      </div>
+    </section>
+
+    <p class="system-note">KAIRU // Codex UIUX Remix // LocalStorage Persistence Live</p>
+  </main>
+</div>
+
+<div class="modal-bg" id="questModal" role="dialog" aria-modal="true" aria-labelledby="questModalTitle">
+  <div class="modal">
+    <h2 id="questModalTitle">New Quest</h2>
+    <label>
+      Title
+      <input id="questTitle" autocomplete="off" placeholder="Launch Phase 1 financial dashboard" maxlength="80">
+    </label>
+    <div class="field-grid">
+      <label>
+        Rarity
+        <select id="questDifficulty">
+          <option value="Common">Common</option>
+          <option value="Uncommon">Uncommon</option>
+          <option value="Rare" selected>Rare</option>
+          <option value="Epic">Epic</option>
+          <option value="Legendary">Legendary</option>
+        </select>
+      </label>
+      <label>
+        Due Date
+        <input type="date" id="questDue">
+      </label>
+    </div>
+    <div class="section-title" style="margin:14px 0 8px;font-size:11px;letter-spacing:.14em;color:var(--text-muted);">DOC 10 COMPUTE — required</div>
+    <div class="field-grid" style="grid-template-columns:1fr 1fr;">
+      <label>
+        Minutes (focused)
+        <input type="number" min="1" max="480" step="1" id="questMinutes" placeholder="e.g. 60">
+      </label>
+      <label>
+        Quality Band
+        <select id="questQuality">
+          <option value="">-- select --</option>
+          <option value="0.25">Passive (0.25x)</option>
+          <option value="0.75">Competent (0.75x)</option>
+          <option value="1.00" selected>Deliberate (1.00x)</option>
+          <option value="1.15">Pressure-tested (1.15x)</option>
+        </select>
+      </label>
+    </div>
+    <div class="field-grid" style="grid-template-columns:1fr 1fr 1fr;">
+      <label>
+        Know-How (1-5)
+        <select id="questKnowHow">
+          <option value="">--</option>
+          <option value="1">1 · Basic</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 · Baseline</option>
+          <option value="4">4</option>
+          <option value="5">5 · Advanced</option>
+        </select>
+      </label>
+      <label>
+        Problem Solving (1-5)
+        <select id="questProblemSolving">
+          <option value="">--</option>
+          <option value="1">1 · Fixed</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 · Baseline</option>
+          <option value="4">4</option>
+          <option value="5">5 · Novel</option>
+        </select>
+      </label>
+      <label>
+        Accountability (1-5)
+        <select id="questAccountability">
+          <option value="">--</option>
+          <option value="1">1 · Low</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 · Baseline</option>
+          <option value="4">4</option>
+          <option value="5">5 · High</option>
+        </select>
+      </label>
+    </div>
+    <div id="doc10Preview" style="display:none;margin:10px 0;padding:10px 12px;border:1px solid rgba(0,229,160,.3);border-radius:6px;background:rgba(0,229,160,.07);font-family:var(--mono);font-size:12px;color:var(--cyan);">
+      COMPUTED CXP: <b id="doc10XPValue">--</b>
+    </div>
+    <div class="field-grid">
+      <label>
+        Primary Skill
+        <select id="questPrimarySkillInput">
+          <option value="">None</option>
+        </select>
+      </label>
+      <label>
+        Support Skills
+        <input type="text" id="questSupportSkillsInput" placeholder="Comma-separated skill names" maxlength="160">
+      </label>
+    </div>
+    <label>
+      Description
+      <textarea id="questDescription" placeholder="Optional context for this mission"></textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-quest">Deploy Quest</button>
+      <button class="btn ghost" type="button" data-action="close-quest">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="noteModal" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle">
+  <div class="modal">
+    <h2 id="noteModalTitle">Quest Complete</h2>
+    <p class="note" id="noteXP">CXP awarded</p>
+    <label>
+      Completion Note
+      <textarea id="noteText" placeholder="What changed because this got done?"></textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-note">Log to Chronicle</button>
+      <button class="btn ghost" type="button" data-action="skip-note">Skip Note</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="financeModal" role="dialog" aria-modal="true" aria-labelledby="financeModalTitle">
+  <div class="modal">
+    <h2 id="financeModalTitle">Edit Financial Data</h2>
+    <div class="field-grid">
+      <label>
+        Assets
+        <input type="number" id="editAssets" step="1">
+      </label>
+      <label>
+        Liabilities
+        <input type="number" id="editLiabilities" step="1">
+      </label>
+      <label>
+        Monthly Income
+        <input type="number" id="editIncome" step="1">
+      </label>
+      <label>
+        Monthly Expenses
+        <input type="number" id="editExpenses" step="1">
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-finance">Commit</button>
+      <button class="btn ghost" type="button" data-action="close-finance">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="disciplineModal" role="dialog" aria-modal="true" aria-labelledby="disciplineModalTitle">
+  <div class="modal">
+    <h2 id="disciplineModalTitle">Add Discipline</h2>
+    <div class="field-grid">
+      <label>
+        Discipline Name
+        <input type="text" id="disciplineNameInput" placeholder="e.g. Bible study, mobility, Spanish" maxlength="48">
+      </label>
+      <label>
+        Category
+        <select id="disciplineCategoryInput">
+          <option value="Spiritual">Spiritual</option>
+          <option value="Faith / Belief">Faith / Belief</option>
+          <option value="Physical">Physical</option>
+          <option value="Mental">Mental</option>
+          <option value="Career">Career</option>
+          <option value="Skill">Skill</option>
+          <option value="Other">Other</option>
+        </select>
+      </label>
+      <label>
+        Time Block
+        <input type="time" id="disciplineTimeInput" value="06:30">
+      </label>
+      <label>
+        Duration Minutes
+        <input type="number" id="disciplineDurationInput" min="1" max="240" step="5" value="15">
+      </label>
+      <label>
+        Frequency
+        <select id="disciplineFrequencyInput">
+          <option value="daily">Daily</option>
+          <option value="4x/week">4x/week</option>
+          <option value="weekly">Weekly</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <label>
+        XP Per Completion
+        <input type="number" id="disciplineXPInput" min="0" max="500" step="5" value="50">
+      </label>
+    </div>
+    <label>
+      Protocol Notes
+      <textarea id="disciplineProtocolInput" placeholder="What counts as complete? What should future AI understand?"></textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-discipline">Add Discipline</button>
+      <button class="btn ghost" type="button" data-action="close-discipline">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="identityModal" role="dialog" aria-modal="true" aria-labelledby="identityModalTitle">
+  <div class="modal">
+    <h2 id="identityModalTitle">Edit Identity</h2>
+    <div class="field-grid">
+      <label>
+        Name
+        <input type="text" id="identityNameInput" placeholder="Operator name" maxlength="40">
+      </label>
+      <label>
+        Archetype
+        <select id="identityArchetypeInput">
+          <option value="The Sovereign">The Sovereign — Systems + Scale</option>
+          <option value="The Warrior">The Warrior — Discipline + Dominance</option>
+          <option value="The Scholar">The Scholar — Knowledge + Mastery</option>
+          <option value="The Creator">The Creator — Vision + Artifact</option>
+          <option value="The Guardian">The Guardian — Protection + Legacy</option>
+          <option value="The Explorer">The Explorer — Discovery + Frontier</option>
+          <option value="The Sage">The Sage — Wisdom + Stillness</option>
+          <option value="The Merchant">The Merchant — Exchange + Return</option>
+        </select>
+      </label>
+      <label>
+        Tier <span style="color:var(--text-dim);font-size:10px;letter-spacing:0;text-transform:none;">(E · D · C · B · A · S · SS · SSS)</span>
+        <input type="text" id="identityTierInput" placeholder="E" maxlength="3">
+      </label>
+      <label>
+        Faith / Belief
+        <select id="identityFaithInput">
+          <option value="Orthodox Christian">Orthodox Christian</option>
+          <option value="Catholic Christian">Catholic Christian</option>
+          <option value="Protestant Christian">Protestant Christian</option>
+          <option value="Islam - Sunni">Islam — Sunni</option>
+          <option value="Islam - Shia">Islam — Shia</option>
+          <option value="Hindu - Shaivite">Hindu — Shaivite</option>
+          <option value="Hindu - Vaishnavite">Hindu — Vaishnavite</option>
+          <option value="Buddhist - Theravada">Buddhist — Theravada</option>
+          <option value="Buddhist - Mahayana/Zen">Buddhist — Mahayana/Zen</option>
+          <option value="Jewish - Orthodox">Jewish — Orthodox</option>
+          <option value="Jewish - Conservative/Reform">Jewish — Conservative/Reform</option>
+          <option value="Secular / No Formal Faith">Secular / No Formal Faith</option>
+          <option value="Other / Custom Later">Other / Custom Later</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-identity">Commit</button>
+      <button class="btn ghost" type="button" data-action="close-identity">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="skillModal" role="dialog" aria-modal="true" aria-labelledby="skillModalTitle">
+  <div class="modal">
+    <h2 id="skillModalTitle">Register Skill</h2>
+    <div class="field-grid">
+      <label>
+        Skill Name
+        <input type="text" id="skillNameInput" placeholder="e.g. Jiu-Jitsu, Python" maxlength="40">
+      </label>
+      <label>
+        Category
+        <select id="skillCategoryInput">
+          <option value="Business / Leadership">Business / Leadership</option>
+          <option value="Technical / Digital">Technical / Digital</option>
+          <option value="Creative / Arts">Creative / Arts</option>
+          <option value="Physical / Athletic">Physical / Athletic</option>
+        </select>
+      </label>
+      <label>
+        Tier
+        <select id="skillTierInput">
+          <option value="acquiring">Acquiring — 1,000 base XP</option>
+          <option value="beginner">Beginner — 1,000 base XP</option>
+          <option value="moderate">Moderate — 1,200 base XP</option>
+          <option value="proficient">Proficient — 1,800 base XP</option>
+          <option value="expert">Expert — 2,500 base XP</option>
+        </select>
+      </label>
+      <label>
+        XP Invested
+        <input type="number" id="skillXPInput" min="0" step="10" value="1000">
+      </label>
+    </div>
+    <label>
+      Tags <span style="color:var(--text-dim);font-size:10px;letter-spacing:0;text-transform:none;">(comma separated)</span>
+      <input type="text" id="skillTagsInput" placeholder="e.g. Closing, Persuasion, Deal Structure" maxlength="100">
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-skill">Register</button>
+      <button class="btn ghost" type="button" data-action="close-skill">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="incomeModal" role="dialog" aria-modal="true" aria-labelledby="incomeModalTitle">
+  <div class="modal">
+    <h2 id="incomeModalTitle">Edit Income Config</h2>
+    <div class="field-grid">
+      <label>
+        Position
+        <input type="text" id="incomePositionInput" placeholder="e.g. Wellness Expert" maxlength="48">
+      </label>
+      <label>
+        Employer
+        <input type="text" id="incomeEmployerInput" placeholder="e.g. CBD Wellness Store" maxlength="48">
+      </label>
+      <label>
+        Hourly Rate ($)
+        <input type="number" id="incomeRateInput" min="0" step="0.5">
+      </label>
+      <label>
+        Base Hours / Week
+        <input type="number" id="incomeBaseHoursInput" min="0" max="168" step="1">
+      </label>
+      <label>
+        Extended Hours / Week
+        <input type="number" id="incomeExtendedHoursInput" min="0" max="168" step="1">
+      </label>
+      <label>
+        Max Hours / Week
+        <input type="number" id="incomeMaxHoursInput" min="0" max="168" step="1">
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-income">Commit</button>
+      <button class="btn ghost" type="button" data-action="close-income">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="pipelineModal" role="dialog" aria-modal="true" aria-labelledby="pipelineModalTitle">
+  <div class="modal">
+    <h2 id="pipelineModalTitle">Add Pipeline Entry</h2>
+    <div class="field-grid">
+      <label>
+        Company
+        <input type="text" id="pipelineCompanyInput" placeholder="e.g. USAA" maxlength="60">
+      </label>
+      <label>
+        Role
+        <input type="text" id="pipelineRoleInput" placeholder="e.g. Team Lead" maxlength="60">
+      </label>
+      <label>
+        Stage
+        <select id="pipelineStageInput">
+          <option value="Identified">Identified</option>
+          <option value="Applied" selected>Applied</option>
+          <option value="Interview">Interview</option>
+          <option value="Offer">Offer</option>
+        </select>
+      </label>
+    </div>
+    <label>
+      Notes
+      <input type="text" id="pipelineNotesInput" placeholder="e.g. Referral pending" maxlength="120">
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-pipeline">Add Entry</button>
+      <button class="btn ghost" type="button" data-action="close-pipeline">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="echoModal" role="dialog" aria-modal="true" aria-labelledby="echoModalTitle">
+  <div class="modal">
+    <h2 id="echoModalTitle">Add Echo</h2>
+    <label>
+      Title
+      <input type="text" id="echoTitleInput" placeholder="What surfaced?" maxlength="80">
+    </label>
+    <label>
+      Reflection
+      <textarea id="echoReflectionInput" placeholder="The meaning or pattern behind it"></textarea>
+    </label>
+    <div class="field-grid">
+      <label>
+        Pattern Tag
+        <input type="text" id="echoPatternInput" placeholder="e.g. momentum, drift" maxlength="32">
+      </label>
+      <label>
+        Emotional Tone
+        <select id="echoToneInput">
+          <option value="neutral" selected>Neutral</option>
+          <option value="driven">Driven</option>
+          <option value="grounded">Grounded</option>
+          <option value="reflective">Reflective</option>
+          <option value="alert">Alert</option>
+          <option value="depleted">Depleted</option>
+        </select>
+      </label>
+      <label>
+        Importance (1-5)
+        <select id="echoImportanceInput">
+          <option value="1">1 · Minor</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 · Baseline</option>
+          <option value="4">4</option>
+          <option value="5">5 · Pivotal</option>
+        </select>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-echo">Log Echo</button>
+      <button class="btn ghost" type="button" data-action="close-echo">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+  <div class="modal">
+    <h2 id="taskModalTitle">New Task</h2>
+    <label>
+      Title
+      <input type="text" id="taskTitleInput" placeholder="e.g. Renew car registration" maxlength="80">
+    </label>
+    <div class="field-grid">
+      <label>
+        Category
+        <select id="taskCategoryInput">
+          <option value="admin">Admin</option>
+          <option value="chore">Chore</option>
+          <option value="finance">Finance</option>
+          <option value="health">Health</option>
+          <option value="errand">Errand</option>
+          <option value="reminder">Reminder</option>
+          <option value="other" selected>Other</option>
+        </select>
+      </label>
+      <label>
+        Due Date
+        <input type="date" id="taskDueInput">
+      </label>
+      <label>
+        Urgency
+        <select id="taskUrgencyInput">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </label>
+      <label>
+        Energy Cost (1-5)
+        <select id="taskEnergyInput">
+          <option value="1">1 · Trivial</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 · Moderate</option>
+          <option value="4">4</option>
+          <option value="5">5 · Draining</option>
+        </select>
+      </label>
+      <label>
+        Consequence
+        <select id="taskConsequenceInput">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </label>
+      <label>
+        Recurring
+        <select id="taskRecurringInput">
+          <option value="none" selected>None</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </label>
+    </div>
+    <label>
+      Notes
+      <textarea id="taskNotesInput" placeholder="Optional context"></textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="save-task">Add Task</button>
+      <button class="btn ghost" type="button" data-action="close-task">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="coachExportModal" role="dialog" aria-modal="true" aria-labelledby="coachExportTitle">
+  <div class="modal" style="width:min(640px, 100%);">
+    <h2 id="coachExportTitle">AI Coach Brief</h2>
+    <p class="panel__copy" style="margin-bottom:14px;">Snapshot of your current state. Copy and paste into Claude, ChatGPT, Gemini, Codex, or Antigravity.</p>
+    <label>
+      Generated Brief
+      <textarea id="coachExportText" readonly style="min-height:300px;font-family:var(--mono);font-size:12px;line-height:1.5;"></textarea>
+    </label>
+    <div class="modal-foot">
+      <button class="btn primary" type="button" data-action="copy-coach-export">Copy to Clipboard</button>
+      <button class="btn ghost" type="button" data-action="close-coach-export">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="assets/kairu-app.js"></script>
+</body>
+</html>
