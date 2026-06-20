@@ -2622,22 +2622,37 @@ function renderQuests() {
 }
 
 function questTemplate(quest) {
+  const rarity = quest.rarity || quest.difficulty;
   const due = quest.due_date ? `Due ${escapeHTML(quest.due_date)}` : "No due date";
-  return `
-    <article class="quest-card">
-      <div>
-        <h4 class="quest-title">${escapeHTML(quest.title)}</h4>
-        <div class="quest-meta">
-          <span class="pill ${difficultyClass(quest.rarity || quest.difficulty)}">${escapeHTML(quest.rarity || quest.difficulty)}</span>
-          <span>Created ${escapeHTML(quest.date_created || "today")}</span>
-          <span>${due}</span>
-          ${quest.description ? `<span>${escapeHTML(quest.description)}</span>` : ""}
+  const created = quest.date_created ? `Created ${escapeHTML(quest.date_created)}` : "";
+  const hasDesc = !!(quest.description && String(quest.description).trim());
+  // Description + metadata live in a collapsible block so long text never drives
+  // card height on mobile. Collapsed = clamped teaser; expanded = full + metadata.
+  const extra = (hasDesc || created) ? `
+      <details class="quest-extra">
+        <summary>
+          ${hasDesc ? `<p class="quest-desc">${escapeHTML(quest.description)}</p>` : ""}
+          <span class="quest-readmore" aria-hidden="true"></span>
+        </summary>
+        <div class="quest-extra__body">
+          ${created ? `<div class="quest-extra__row">${created}</div>` : ""}
         </div>
-      </div>
-      <div class="toolbar">
+      </details>` : "";
+  const flagBtn = (!quest.serendipity_flagged && !quest.is_locked)
+    ? `<button class="btn ghost" type="button" data-action="flag-serendipity" data-id="${escapeHTML(quest.id)}">Flag Serendipity</button>`
+    : "";
+  return `
+    <article class="quest-card quest-card--v">
+      <div class="quest-card__top">
+        <span class="pill ${difficultyClass(rarity)}">${escapeHTML(rarity)}</span>
         <span class="xp">${questBaseXP(quest).toLocaleString()} CXP</span>
+      </div>
+      <h4 class="quest-title">${escapeHTML(quest.title)}</h4>
+      <div class="quest-due">${due}</div>
+      ${extra}
+      <div class="quest-actions">
         <button class="btn cyan" type="button" data-action="complete-quest" data-id="${escapeHTML(quest.id)}">Complete</button>
-        ${!quest.serendipity_flagged && !quest.is_locked ? `<button class="btn ghost" type="button" data-action="flag-serendipity" data-id="${escapeHTML(quest.id)}">Flag Serendipity</button>` : ""}
+        ${flagBtn}
       </div>
     </article>
   `;

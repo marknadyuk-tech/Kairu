@@ -2367,3 +2367,82 @@ body.sanctuary-active .app {
   .track-copy { font-size: 11px; line-height: 1.35; margin-top: 3px; }
   .track-locked { padding: 8px 12px; font-size: 11px; }
 }
+
+/* ============================================================
+   Quest card — compact vertical layout with collapsible details
+   so long descriptions never drive card height.
+   ============================================================ */
+.quest-card--v {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+}
+.quest-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.quest-due {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.quest-extra { margin: 0; }
+.quest-extra > summary {
+  cursor: pointer;
+  list-style: none;
+  display: block;
+}
+.quest-extra > summary::-webkit-details-marker { display: none; }
+.quest-desc {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.quest-readmore {
+  display: none; /* desktop shows the full description, no toggle needed */
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--cyan);
+}
+.quest-readmore::after { content: "▾ Details"; }
+.quest-extra[open] .quest-readmore::after { content: "▴ Less"; }
+.quest-extra__body {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  display: grid;
+  gap: 4px;
+}
+/* Desktop: metadata stays visible even when the <details> is closed. */
+.quest-extra:not([open]) .quest-extra__body { display: grid; }
+.quest-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.quest-actions .btn { flex: 1; justify-content: center; }
+
+@media (max-width: 960px) {
+  .quest-card { padding: 14px; }
+  /* Mobile: clamp the description to a 2-line faded teaser; reveal full text
+     + metadata only on expand. Keeps 3–5 quests scannable per screen. */
+  .quest-readmore { display: block; }
+  .quest-extra:not([open]) .quest-extra__body { display: none; }
+  .quest-extra:not([open]) .quest-desc {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent);
+            mask-image: linear-gradient(180deg, #000 55%, transparent);
+  }
+}
