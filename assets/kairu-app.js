@@ -403,48 +403,53 @@ function attemptAscend() {
   showToast(`Ascended to ${result.newRank}${result.titleUnlocked ? " // " + result.titleUnlocked : ""}`);
 }
 
+// Concise, actionable titles. The descriptive copy is now a live status line
+// (see viewStatusHTML) so the header surfaces numbers, not restated labels.
 const copy = {
-  command: {
-    eyebrow: "KAIRU Command",
-    title: "Command Center",
-    text: "The doorway has opened. Move deliberately through quests, disciplines, capital, and capability."
-  },
-  quests: {
-    eyebrow: "Quest Board",
-    title: "Mission Ledger",
-    text: "Turn intentions into visible commitments, then chronicle the wins with receipts."
-  },
-  archive: {
-    eyebrow: "KAIRU Chronicle",
-    title: "Mission Chronicle",
-    text: "Deep history of completed quests, receipts, and pattern memory."
-  },
-  skills: {
-    eyebrow: "Skill Registry",
-    title: "Skill Tree",
-    text: "Track your capabilities across categories. Log XP to level up each skill."
-  },
-  financial: {
-    eyebrow: "Financial Inventory",
-    title: "Net Position",
-    text: "A simple local snapshot for assets, liabilities, income, and expenses."
-  },
-  pipeline: {
-    eyebrow: "Income & Opportunity",
-    title: "Job Pipeline",
-    text: "Track active applications across four stages. One offer is the target."
-  },
-  discipline: {
-    eyebrow: "Discipline Stack",
-    title: "Daily Protocol",
-    text: "Log completions, bank XP, watch the pattern build."
-  },
-  tasks: {
-    eyebrow: "Maintenance Layer",
-    title: "Task Board",
-    text: "Low-stakes upkeep — admin, chores, errands. Tasks clear open loops; they never award XP."
-  }
+  command:   { eyebrow: "KAIRU Command",       title: "Command Center" },
+  quests:    { eyebrow: "Quest Board",         title: "Quests" },
+  archive:   { eyebrow: "KAIRU Chronicle",     title: "Chronicle" },
+  skills:    { eyebrow: "Skill Registry",      title: "Skills" },
+  financial: { eyebrow: "Financial Inventory", title: "Financial" },
+  pipeline:  { eyebrow: "Income & Opportunity", title: "Pipeline" },
+  discipline:{ eyebrow: "Discipline Stack",    title: "Discipline" },
+  tasks:     { eyebrow: "Maintenance Layer",   title: "Tasks" }
 };
+
+// Live status line for the header. Surfaces real numbers per view; the command
+// view renders a compact multi-stat HUD. Recomputed on nav and on every render.
+function viewStatusHTML(view) {
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
+  switch (view) {
+    case 'command': {
+      const quests = (state.activeQuests || []).length;
+      const protocols = (state.disciplines || []).filter(disciplineAppliesToday).length;
+      const cxp = getCompetenceXP();
+      const tracked = isTrackedToday();
+      const chip = (val, label, cls) => `<span class="cmd-hud__chip${cls ? ' ' + cls : ''}"><b>${val}</b>${label}</span>`;
+      return `<span class="cmd-hud">${
+        chip(quests, 'Active Quests')}${
+        chip(protocols, 'Protocols Today')}${
+        chip(cxp.toLocaleString() + ' ', 'CXP')}${
+        tracked ? chip('+3%', 'Tracking Active', 'is-live') : chip('OFF', 'Tracking', 'is-off')
+      }</span>`;
+    }
+    case 'quests':    return escapeHTML(plural((state.activeQuests || []).length, 'active mission'));
+    case 'discipline':return escapeHTML(plural((state.disciplines || []).filter(disciplineAppliesToday).length, 'protocol') + ' today');
+    case 'skills':    return escapeHTML(plural((state.skills || []).length, 'active skill'));
+    case 'pipeline':  return escapeHTML(plural((state.jobPipeline || []).length, 'opportunity', 'opportunities') + ' tracked');
+    case 'tasks':     return escapeHTML(plural((state.tasks || []).filter(t => !t.done && !t.completed).length, 'open task'));
+    case 'financial': return escapeHTML(formatMoney((state.financials.assets || 0) - (state.financials.liabilities || 0)) + ' net worth');
+    case 'archive':   return escapeHTML(plural((state.archivedQuests || []).length, 'quest') + ' chronicled');
+    default:          return '';
+  }
+}
+
+function updateViewStatus() {
+  const active = document.querySelector('.view.active');
+  if (!active || !els.viewCopy) return;
+  els.viewCopy.innerHTML = viewStatusHTML(active.id);
+}
 
 const defaultState = {
   totalXP: 0,
@@ -1269,8 +1274,8 @@ function setView(view) {
   if (nextCopy) {
     els.viewEyebrow.textContent = nextCopy.eyebrow;
     els.viewTitle.textContent = nextCopy.title;
-    els.viewCopy.textContent = nextCopy.text;
   }
+  updateViewStatus();
 
   // Bring the freshly shown view into focus on mobile (content scrolls under header).
   const mainEl = document.querySelector(".main");
@@ -3648,6 +3653,7 @@ function renderAll() {
   renderTasks();
   renderReadiness();
   renderResume();
+  updateViewStatus(); // keep the header status line's live numbers in sync
   els.bootCompound.textContent = `Compound Multiplier: ${compound().toFixed(2)}x`;
 }
 
@@ -3696,6 +3702,10 @@ function renderIdentity() {
   const compMetaEl = document.getElementById('identityCompoundMeta');
   if (compEl) compEl.textContent = mult.toFixed(2) + 'x';
   if (compMetaEl) compMetaEl.textContent = '+1% per tracked day, compounding';
+
+  // Compact peek shown on the collapsed "Operator Stats" summary.
+  const peekEl = document.getElementById('operatorStatsPeek');
+  if (peekEl) peekEl.textContent = `Cycle ${cycleDay} · ${days}d · ${mult.toFixed(2)}x`;
 }
 
 // --- Local skill-suggestion heuristic -------------------------------------
