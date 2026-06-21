@@ -158,11 +158,8 @@
         <h2 class="page-title" id="viewTitle">Command Center</h2>
         <p class="page-copy" id="viewCopy">Track today, complete one quest, bank the XP, and keep the loop alive through reload.</p>
       </div>
-      <div class="clock" id="clock" aria-live="polite"></div>
-    </header>
-
-    <section class="view active" id="command" aria-label="Command dashboard">
-      <div class="section">
+      <div class="topbar__status">
+        <div class="clock" id="clock" aria-live="polite"></div>
         <div class="track-panel" id="trackPanel">
           <div class="track-panel__text">
             <div class="track-kicker" id="trackKicker">Daily Tracking</div>
@@ -173,10 +170,13 @@
           <div class="track-locked" id="trackLocked" role="status" aria-live="polite" hidden>
             <span class="track-locked__lock" aria-hidden="true">&#128274;</span>
             <span class="track-locked__text">LOCKED</span>
+            <span class="track-locked__sub">until midnight</span>
           </div>
         </div>
       </div>
+    </header>
 
+    <section class="view active" id="command" aria-label="Command dashboard">
       <div class="section">
         <div class="grid metrics">
           <article class="card card--primary">

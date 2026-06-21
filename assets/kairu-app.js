@@ -1378,6 +1378,11 @@ function setView(view) {
     subEl.textContent = `${PHASE_LABEL} // ${pageName}`;
   }
 
+  // The lock / Track-Today control lives in the shared header status row but is a
+  // Command-dashboard concern — show it only on the command view.
+  const trackPanelEl = document.getElementById("trackPanel");
+  if (trackPanelEl) trackPanelEl.style.display = (view === "command") ? "" : "none";
+
   updateViewStatus();
 
   // Bring the freshly shown view into focus on mobile (content scrolls under header).

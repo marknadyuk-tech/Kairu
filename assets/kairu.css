@@ -590,29 +590,35 @@ textarea:focus-visible {
   line-height: 1.5;
 }
 
-.track-panel {
-  /* Slim lock-status rail: sits compact on the right, never blocks main content.
-     The verbose kicker/title/copy is hidden; only the control (Track button or
-     the vertical LOCKED rail) shows. */
+/* Header status row: the date/time clock + the compact lock badge sit side by
+   side, filling the space beside the clock. */
+.topbar__status {
   display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  /* Shrink-wrap to the right so it's a compact top-right card, not a full-width
-     band — keeps the main content area clear. */
-  width: fit-content;
-  margin-left: auto;
-  border-left: 4px solid var(--cyan);
-  background: linear-gradient(90deg, rgba(0, 229, 255, 0.05) 0%, transparent 60%), var(--surface);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  align-items: stretch;
+  gap: 10px;
+  flex-shrink: 0;
 }
+.topbar__status .clock { flex: 1; min-width: 0; }
 
+/* The track-panel is now a bare wrapper around the Track button / lock badge —
+   no card chrome of its own (the badge carries the visual). */
+.track-panel {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  flex-shrink: 0;
+}
 .track-panel__text { display: none; }
 
+/* Lock state carries no panel chrome now — the badge supplies the visual. */
 .track-panel.locked {
-  border-left-color: var(--green);
-  background: linear-gradient(90deg, rgba(0, 230, 118, 0.05) 0%, transparent 60%), var(--surface);
+  border: none;
+  background: none;
+  box-shadow: none;
 }
 
 .track-kicker {
@@ -2154,32 +2160,38 @@ body.sanctuary-active .app {
    rules (class specificity beats the UA [hidden] rule), so enforce it explicitly. */
 .btn[hidden] { display: none !important; }
 .track-locked[hidden] { display: none !important; }
-.track-panel.locked {
-  border-color: rgba(0, 229, 255, 0.35);
-  box-shadow: var(--cyan-glow);
-  background: linear-gradient(90deg, var(--cyan-soft), transparent);
-}
+.track-panel.locked { border: none; background: none; box-shadow: none; }
 .track-locked {
-  /* Vertical slim rail: lock icon stacked over "LOCKED". */
+  /* Compact ~square lock badge: 🔒 over LOCKED over "until midnight". Sits beside
+     the clock in the header status row and matches its height. */
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 14px;
+  height: 100%;
   border: 1px solid rgba(0, 230, 118, 0.45);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(0, 230, 118, 0.08);
   color: var(--green);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.05;
   letter-spacing: 0.12em;
   text-align: center;
   cursor: default;
   user-select: none;
 }
-.track-locked__lock { font-size: 16px; filter: drop-shadow(0 0 6px rgba(0, 230, 118, 0.6)); }
+.track-locked__lock { font-size: 15px; filter: drop-shadow(0 0 6px rgba(0, 230, 118, 0.6)); }
+.track-locked__sub {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
 .track-locked__text b { color: var(--text); font-weight: 600; }
 
 /* --- Ascension Rank prominence + collapsible requirements --- */
@@ -2445,9 +2457,9 @@ body.sanctuary-active .app {
   .panel { padding: 16px; }
   .metrics { gap: 10px; }
 
-  /* Slim lock rail stays compact and right-aligned on mobile. */
-  .track-panel { gap: 10px; padding: 8px 12px; }
-  .track-locked { padding: 7px 12px; font-size: 11px; }
+  /* Lock badge stays compact beside the clock on mobile. */
+  .track-locked { padding: 6px 12px; font-size: 10px; }
+  .track-locked__lock { font-size: 14px; }
 }
 
 /* ============================================================
