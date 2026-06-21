@@ -465,6 +465,38 @@ textarea:focus-visible {
   opacity: 0.8;
 }
 
+/* Tappable metric cards on the Command Center — act as quick links to their tab. */
+.card--link {
+  cursor: pointer;
+}
+
+.card--link:hover {
+  border-color: rgba(0, 229, 255, 0.28);
+}
+
+.card--link::after {
+  content: "\2197"; /* north-east arrow */
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.card--link:hover::after,
+.card--link:focus-visible::after {
+  opacity: 1;
+  color: var(--cyan);
+}
+
+.card--link:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
 .card--primary {
   grid-column: span 2;
   min-height: 140px;
@@ -744,6 +776,32 @@ textarea:focus-visible {
 .echo-stack {
   display: grid;
   gap: 10px;
+}
+
+/* Toggle for the collapsed older-echo stack. */
+.echo-toggle {
+  justify-self: start;
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.echo-toggle:hover {
+  color: var(--cyan);
+  border-color: rgba(0, 229, 255, 0.3);
+}
+
+.echo-stack--older[hidden] {
+  display: none;
 }
 
 .echo-card {

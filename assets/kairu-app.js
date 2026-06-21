@@ -1173,8 +1173,34 @@ function getSkillXP() {
   return (state.skills || []).reduce((sum, skill) => sum + (Number(skill.xp) || 0), 0);
 }
 
+// Discipline categories that count as spiritual cultivation. Completing one of
+// these disciplines feeds Spiritual XP (SXP) so prayer / faith / spiritual reps
+// produce visible spiritual progression, not just generic XP.
+const SPIRITUAL_DISCIPLINE_CATEGORIES = ["Spiritual", "Faith / Belief"];
+
+function isSpiritualDiscipline(disc) {
+  return !!disc && SPIRITUAL_DISCIPLINE_CATEGORIES.includes(disc.category);
+}
+
+// SXP earned from logged spiritual/faith disciplines. Derived from disciplineLog
+// (the same source of truth as discipline streaks) so it stays in sync with what
+// the user has actually completed. Entries whose discipline has been deleted are
+// ignored.
+function getDisciplineSpiritualXP() {
+  const log = Array.isArray(state.disciplineLog) ? state.disciplineLog : [];
+  const discs = Array.isArray(state.disciplines) ? state.disciplines : [];
+  const spiritualIds = new Set(discs.filter(isSpiritualDiscipline).map(d => d.id));
+  if (!spiritualIds.size) return 0;
+  return log.reduce((sum, entry) => {
+    return spiritualIds.has(entry.disciplineId)
+      ? sum + (Number(entry.postedXP) || 0)
+      : sum;
+  }, 0);
+}
+
 function getSpiritualXP() {
-  return (state.spiritualPractices || []).reduce((sum, practice) => sum + calculateSXP(practice), 0);
+  const practicesSXP = (state.spiritualPractices || []).reduce((sum, practice) => sum + calculateSXP(practice), 0);
+  return practicesSXP + getDisciplineSpiritualXP();
 }
 
 function getDevelopmentTotals() {
@@ -1504,7 +1530,20 @@ function calculatePostableXP(rawXP, dateString) {
   return { rawXP, postedXP, band };
 }
 
+// Auto-advance the operating cycle the first time any XP-earning activity is
+// logged on a new day. "Days Tracked" is meant to reflect intentional active
+// days; relying on the manual Track button alone left it stagnant for users who
+// were clearly active (completing quests / disciplines). Returns true if it
+// advanced the counter this call. The explicit Track button still works.
+function ensureTrackedToday() {
+  if (isTrackedToday()) return false;
+  state.daysTracked += 1;
+  state.lastTrackDate = localToday();
+  return true;
+}
+
 function recordDailyXP(rawXP, postedXP, dateString) {
+  ensureTrackedToday();
   if (!state.dailyXPLedger) state.dailyXPLedger = {};
   const existing = state.dailyXPLedger[dateString] || { rawXP: 0, postedXP: 0 };
   state.dailyXPLedger[dateString] = {
@@ -1868,6 +1907,32 @@ function saveEcho() {
   showToast("Echo logged");
 }
 
+// Whether the collapsed older-echo stack is currently expanded. Older echoes are
+// hidden by default so the reflective log doesn't create an endless scroll on
+// mobile; the user can expand to see history on demand.
+let echoesExpanded = false;
+
+function echoCardHTML(e) {
+  const next = e.suggestedNextAction
+    ? `<div class="echo-card__next">&rarr; ${escapeHTML(e.suggestedNextAction)}</div>`
+    : "";
+  const reflection = e.reflection
+    ? `<p class="echo-card__reflection">${escapeHTML(e.reflection)}</p>`
+    : "";
+  return `
+    <article class="echo-card">
+      <div class="echo-card__head">
+        <h4 class="echo-card__title">${escapeHTML(e.title)}</h4>
+        <span class="echo-card__time">${escapeHTML(echoTimeAgo(e.createdAt))}</span>
+      </div>
+      ${reflection}
+      <div class="echo-card__foot">
+        <span class="pill discipline">${escapeHTML(e.patternTag)}</span>
+        ${next}
+      </div>
+    </article>`;
+}
+
 function renderEchoes() {
   const container = document.getElementById("echoList");
   if (!container) return;
@@ -1876,26 +1941,21 @@ function renderEchoes() {
     container.innerHTML = '<div class="empty">No echoes yet. Reflections appear here as you complete quests and hold streaks.</div>';
     return;
   }
-  container.innerHTML = echoes.slice(0, 5).map(e => {
-    const next = e.suggestedNextAction
-      ? `<div class="echo-card__next">&rarr; ${escapeHTML(e.suggestedNextAction)}</div>`
-      : "";
-    const reflection = e.reflection
-      ? `<p class="echo-card__reflection">${escapeHTML(e.reflection)}</p>`
-      : "";
-    return `
-      <article class="echo-card">
-        <div class="echo-card__head">
-          <h4 class="echo-card__title">${escapeHTML(e.title)}</h4>
-          <span class="echo-card__time">${escapeHTML(echoTimeAgo(e.createdAt))}</span>
-        </div>
-        ${reflection}
-        <div class="echo-card__foot">
-          <span class="pill discipline">${escapeHTML(e.patternTag)}</span>
-          ${next}
-        </div>
-      </article>`;
-  }).join("");
+
+  const MAX_RENDERED = 10; // keep the rendered log bounded for a light page
+  const visible = echoes.slice(0, MAX_RENDERED);
+  const latest = visible[0];
+  const older = visible.slice(1);
+
+  let html = echoCardHTML(latest);
+  if (older.length) {
+    const label = echoesExpanded
+      ? "Hide previous echoes"
+      : `Show ${older.length} previous echo${older.length === 1 ? "" : "es"}`;
+    html += `<button class="echo-toggle" type="button" data-action="toggle-echoes" aria-expanded="${echoesExpanded}">${label}</button>`;
+    html += `<div class="echo-stack echo-stack--older"${echoesExpanded ? "" : " hidden"}>${older.map(echoCardHTML).join("")}</div>`;
+  }
+  container.innerHTML = html;
 }
 
 /* ===================== TASKS SYSTEM =====================
@@ -3061,8 +3121,10 @@ function logDiscipline(disciplineId) {
   renderMetrics();
   renderCommandBrief();
   renderXPLog();
-  showXPFlash('+' + discCapResult.postedXP.toLocaleString() + ' XP');
-  showToast(disc.name + ' logged // +' + discCapResult.postedXP.toLocaleString() + ' XP');
+  const spiritual = isSpiritualDiscipline(disc);
+  const xpLabel = spiritual ? ' SXP' : ' XP';
+  showXPFlash('+' + discCapResult.postedXP.toLocaleString() + xpLabel);
+  showToast(disc.name + ' logged // +' + discCapResult.postedXP.toLocaleString() + xpLabel);
 }
 
 function renderLegacyDisciplineCards() {
@@ -3990,9 +4052,9 @@ function renderSkills() {
           <span>${xp.toLocaleString()} XP</span>
           <span>${pct}% to max</span>
         </div>
-        <button class="btn ghost" data-action="adjust-skill-xp" data-skill-id="${escapeHTML(s.id)}"
+        <button class="btn ghost" data-action="edit-skill" data-skill-id="${escapeHTML(s.id)}"
           style="width:100%;justify-content:center;margin-top:10px;font-size:11px;min-height:30px;">
-          Adjust XP
+          Edit
         </button>
       </article>`;
     }).join('');
@@ -4065,14 +4127,44 @@ function saveIdentity() {
 // Tracks whether the operator has hand-edited the skill meta fields; while false,
 // the heuristic is allowed to keep refining suggestions as they type the name.
 let skillMetaTouched = false;
+// Id of the skill currently being edited via the skill modal, or null when the
+// modal is in "register new" mode.
+let editingSkillId = null;
+
+function setSkillModalMode(editing) {
+  const titleEl = document.getElementById('skillModalTitle');
+  const saveBtn = document.querySelector('[data-action="save-skill"]');
+  if (titleEl) titleEl.textContent = editing ? 'Edit Skill' : 'Register Skill';
+  if (saveBtn) saveBtn.textContent = editing ? 'Save Changes' : 'Register';
+}
 
 function openSkill() {
+  editingSkillId = null;
   skillMetaTouched = false;
   document.getElementById('skillNameInput').value = '';
   document.getElementById('skillCategoryInput').value = 'Business / Leadership';
   document.getElementById('skillTierInput').value = 'acquiring';
   document.getElementById('skillXPInput').value = '1000';
   document.getElementById('skillTagsInput').value = '';
+  setSkillModalMode(false);
+  showModal(els.skillModal);
+  setTimeout(() => document.getElementById('skillNameInput').focus(), 50);
+}
+
+// Open the skill modal pre-filled to edit an existing skill. Lets the operator
+// recalibrate an extracted/imported skill's tier (proficiency), category, and XP
+// — important for resume-imported skills that land mis-classified as "Acquiring".
+function editSkill(skillId) {
+  const skill = (state.skills || []).find(s => s.id === skillId);
+  if (!skill) return;
+  editingSkillId = skillId;
+  skillMetaTouched = true; // don't let the name heuristic overwrite real values
+  document.getElementById('skillNameInput').value = skill.name || '';
+  document.getElementById('skillCategoryInput').value = skill.category || 'Business / Leadership';
+  document.getElementById('skillTierInput').value = String(skill.tier || 'acquiring').toLowerCase();
+  document.getElementById('skillXPInput').value = String(Number(skill.xp) || 0);
+  document.getElementById('skillTagsInput').value = Array.isArray(skill.tags) ? skill.tags.join(', ') : '';
+  setSkillModalMode(true);
   showModal(els.skillModal);
   setTimeout(() => document.getElementById('skillNameInput').focus(), 50);
 }
@@ -4113,10 +4205,33 @@ function saveSkill() {
   const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
 
   const tierDefaults = TIER_XP_DEFAULTS[tier] || TIER_XP_DEFAULTS.acquiring;
-  const xp = xpInput || tierDefaults.xp;
-  const xpMax = tierDefaults.xpMax;
+  // When editing, honor the literal XP entered (including 0, e.g. a freshly
+  // imported resume skill). When registering new, an empty field defaults to the
+  // tier's nominal starting XP.
+  const xp = editingSkillId ? xpInput : (xpInput || tierDefaults.xp);
+  // Allow a hand-set XP above the tier's nominal max so the value the operator
+  // enters is never silently clamped; the progress bar still caps visually.
+  const xpMax = Math.max(tierDefaults.xpMax, xp);
 
   if (!Array.isArray(state.skills)) state.skills = [];
+
+  if (editingSkillId) {
+    const skill = state.skills.find(s => s.id === editingSkillId);
+    if (skill) {
+      skill.name = name;
+      skill.category = category;
+      skill.tier = tier;
+      skill.xp = xp;
+      skill.xpMax = xpMax;
+      skill.tags = tags;
+    }
+    editingSkillId = null;
+    saveState();
+    hideModal(els.skillModal);
+    renderAll();
+    showToast(name + ' updated');
+    return;
+  }
 
   state.skills.push({
     id: 'sk-' + Date.now(),
@@ -4174,6 +4289,7 @@ document.addEventListener("click", (event) => {
   if (action === "save-skill") saveSkill();
   if (action === "close-skill") hideModal(els.skillModal);
   if (action === "adjust-skill-xp") adjustSkillXP(actionTarget.dataset.skillId);
+  if (action === "edit-skill") editSkill(actionTarget.dataset.skillId);
   if (action === "reset") resetState();
   if (action === "export-backup") exportBackup();
   if (action === "import-backup") importBackup();
@@ -4187,6 +4303,7 @@ document.addEventListener("click", (event) => {
   if (action === "open-echo") openEcho();
   if (action === "close-echo") closeEcho();
   if (action === "save-echo") saveEcho();
+  if (action === "toggle-echoes") { echoesExpanded = !echoesExpanded; renderEchoes(); }
   if (action === "open-task") openTask();
   if (action === "close-task") closeTask();
   if (action === "save-task") saveTask();
@@ -4225,6 +4342,17 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  // Enter / Space activates non-button elements exposed as role="button"
+  // (e.g. the tappable metric cards on the Command Center).
+  if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") {
+    const target = event.target;
+    if (target && target.getAttribute && target.getAttribute("role") === "button" && target.dataset && target.dataset.action) {
+      event.preventDefault();
+      target.click();
+    }
+    return;
+  }
+
   if (event.key !== "Escape") return;
   [els.questModal, els.noteModal, els.financeModal, els.disciplineModal, els.identityModal, els.skillModal, els.incomeModal, els.pipelineModal, els.echoModal, els.taskModal, els.coachExportModal].forEach(hideModal);
 });
