@@ -1154,6 +1154,21 @@ function applySkillXPAllocation(skillXpEarned = {}) {
   });
 }
 
+// Compact "Skill +N · Skill +N" breakdown of an allocation map, for completion
+// feedback. Sorted high-to-low; caps the visible list so the toast stays short.
+function formatSkillXPBreakdown(skillXpEarned = {}, maxShown = 2) {
+  const entries = Object.entries(skillXpEarned)
+    .map(([name, amount]) => [name, Number(amount) || 0])
+    .filter(([, amount]) => amount > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return "";
+  const shown = entries.slice(0, maxShown)
+    .map(([name, amount]) => `${name} +${amount.toLocaleString()}`)
+    .join(" · ");
+  const extra = entries.length - maxShown;
+  return extra > 0 ? `${shown} · +${extra} more` : shown;
+}
+
 function getCompetenceXP() {
   return (state.archivedQuests || []).reduce((sum, quest) => {
     return sum + (Number(quest.cxp_earned ?? quest.xp_earned) || 0);
@@ -1193,6 +1208,20 @@ function getDisciplineSpiritualXP() {
   if (!spiritualIds.size) return 0;
   return log.reduce((sum, entry) => {
     return spiritualIds.has(entry.disciplineId)
+      ? sum + (Number(entry.postedXP) || 0)
+      : sum;
+  }, 0);
+}
+
+// SXP earned from spiritual/faith disciplines logged on a specific date (default
+// today). Used by the Coach Brief to report spiritual consistency per day.
+function getDisciplineSpiritualXPOn(dateString = localToday()) {
+  const log = Array.isArray(state.disciplineLog) ? state.disciplineLog : [];
+  const discs = Array.isArray(state.disciplines) ? state.disciplines : [];
+  const spiritualIds = new Set(discs.filter(isSpiritualDiscipline).map(d => d.id));
+  if (!spiritualIds.size) return 0;
+  return log.reduce((sum, entry) => {
+    return (entry.date === dateString && spiritualIds.has(entry.disciplineId))
       ? sum + (Number(entry.postedXP) || 0)
       : sum;
   }, 0);
@@ -1629,7 +1658,11 @@ function completeQuest(questId) {
     ? ` // legacy cap posted +${capResult.postedXP}`
     : '';
   showXPFlash(`+${rawCXP.toLocaleString()} CXP`);
-  showToast(`Chronicled // CXP banked${totalKXP ? ` // +${totalKXP.toLocaleString()} KXP` : ""}${bandMsg}`);
+  const skillBreakdown = formatSkillXPBreakdown(skillXpEarned);
+  const skillMsg = skillBreakdown
+    ? ` // ${skillBreakdown}`
+    : (totalKXP ? ` // +${totalKXP.toLocaleString()} KXP` : "");
+  showToast(`Chronicled // +${rawCXP.toLocaleString()} CXP${skillMsg}${bandMsg}`);
 
   promptContributor(questId);
 }
@@ -2436,6 +2469,56 @@ function buildCoachBrief() {
   } else {
     L.push("- None chronicled yet.");
   }
+  L.push("");
+
+  // Quest-to-skill progression: gives a future AI the explicit mapping between
+  // completed quests and the skills they advanced, plus spiritual consistency.
+  L.push("## RECENT PROGRESSION EVENTS (latest 5 completions)");
+  const progressionQuests = archived.slice(0, 5);
+  if (progressionQuests.length) {
+    progressionQuests.forEach(q => {
+      const cxp = Number(q.cxp_earned ?? q.xp_earned) || 0;
+      L.push(`- Completed Quest: ${q.title}${q.date_completed ? ` (${q.date_completed})` : ""}`);
+      L.push(`  CXP Earned: ${cxp.toLocaleString()}`);
+      const skillEntries = (q.skillXpEarned && typeof q.skillXpEarned === "object")
+        ? Object.entries(q.skillXpEarned).filter(([, v]) => (Number(v) || 0) > 0).sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
+        : [];
+      if (skillEntries.length) {
+        L.push("  Skills Advanced:");
+        skillEntries.forEach(([name, v]) => L.push(`    * ${name} +${(Number(v) || 0).toLocaleString()} XP`));
+      } else {
+        L.push("  Skills Advanced: none linked");
+      }
+    });
+  } else {
+    L.push("- No completions chronicled yet.");
+  }
+  const sxpToday = (typeof getDisciplineSpiritualXPOn === "function") ? getDisciplineSpiritualXPOn() : 0;
+  L.push(`- Spiritual XP logged today: ${sxpToday.toLocaleString()}`);
+  L.push("");
+
+  L.push("## CURRENT SKILL SIGNALS");
+  if (skills.length) {
+    const recentlyAdvanced = new Set();
+    progressionQuests.forEach(q => {
+      if (q.skillXpEarned && typeof q.skillXpEarned === "object") {
+        Object.entries(q.skillXpEarned).forEach(([name, v]) => { if ((Number(v) || 0) > 0) recentlyAdvanced.add(String(name).toLowerCase()); });
+      }
+    });
+    skills.slice()
+      .sort((a, b) => (Number(b.xp) || 0) - (Number(a.xp) || 0))
+      .slice(0, 6)
+      .forEach(sk => {
+        const tier = (typeof getTierLabel === "function") ? getTierLabel(sk.tier) : (sk.tier || "Acquiring");
+        const active = recentlyAdvanced.has(String(sk.name || "").toLowerCase()) ? " — recent activity" : "";
+        L.push(`- ${sk.name} is progressing through the ${tier} tier (${Number(sk.xp) || 0}/${Number(sk.xpMax) || 0} XP)${active}.`);
+      });
+  } else {
+    L.push("- No skills registered — extraction or manual entry needed before quests can advance capability.");
+  }
+  L.push(sxpToday > 0
+    ? `- Spiritual growth logged today (${sxpToday.toLocaleString()} SXP).`
+    : "- No spiritual growth logged today.");
   L.push("");
 
   L.push("## DISCIPLINES & STREAKS");
