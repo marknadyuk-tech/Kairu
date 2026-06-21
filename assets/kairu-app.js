@@ -1591,6 +1591,89 @@ function completeQuest(questId) {
     : '';
   showXPFlash(`+${rawCXP.toLocaleString()} CXP`);
   showToast(`Chronicled // CXP banked${totalKXP ? ` // +${totalKXP.toLocaleString()} KXP` : ""}${bandMsg}`);
+
+  promptContributor(questId);
+}
+
+function logContribution(questId, contactName, contributionType, note) {
+  const contributors = JSON.parse(localStorage.getItem('questContributors') || '[]');
+  contributors.push({
+    contribution_id: 'con_' + Date.now(),
+    contact_name: contactName.trim(),
+    quest_id: questId,
+    contribution_type: contributionType,
+    data_source: 'USER_CLAIMED',
+    logged_at: new Date().toISOString(),
+    note: note || null
+  });
+  localStorage.setItem('questContributors', JSON.stringify(contributors));
+}
+
+function getTopContributors(limit = 5) {
+  const contributors = JSON.parse(localStorage.getItem('questContributors') || '[]');
+  const frequency = contributors.reduce((acc, entry) => {
+    acc[entry.contact_name] = (acc[entry.contact_name] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(frequency)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, contributions: count }));
+}
+
+// Post-completion prompt: offer to log a contributor for the quest. Built to match
+// the file's existing static modal markup (.modal-bg/.modal + .btn data-actions) but
+// created on the fly and self-wired, so it stays out of the global modal handler.
+// Skip simply removes the modal — completeQuest() has already finished (XP awarded,
+// quest archived) by the time this runs, so dismissing never blocks completion.
+function promptContributor(questId) {
+  const CONTRIBUTION_TYPES = [
+    'ADVICE', 'INTRODUCTION', 'ACCOUNTABILITY',
+    'COLLABORATION', 'RESOURCE', 'GUIDANCE', 'SPONSORSHIP'
+  ];
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg show';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'contributorModalTitle');
+  modal.innerHTML = `
+    <div class="modal">
+      <h2 id="contributorModalTitle">Did anyone help advance this quest?</h2>
+      <label>
+        Contributor Name
+        <input type="text" id="contributorName" placeholder="Who moved this forward?">
+      </label>
+      <label>
+        Contribution Type
+        <select id="contributorType">
+          ${CONTRIBUTION_TYPES.map(t => `<option value="${t}">${t}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        Note (optional)
+        <textarea id="contributorNote" placeholder="How did they help?"></textarea>
+      </label>
+      <div class="modal-foot">
+        <button class="btn primary" type="button" data-action="log-contributor">Log Contributor</button>
+        <button class="btn ghost" type="button" data-action="skip-contributor">Skip</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+
+  modal.querySelector('[data-action="skip-contributor"]').addEventListener('click', close);
+  modal.querySelector('[data-action="log-contributor"]').addEventListener('click', () => {
+    const name = modal.querySelector('#contributorName').value;
+    if (!name.trim()) { close(); return; }
+    const type = modal.querySelector('#contributorType').value;
+    const note = modal.querySelector('#contributorNote').value;
+    logContribution(questId, name, type, note);
+    showToast(`Contributor logged // ${name.trim()}`);
+    close();
+  });
 }
 
 function flagSerendipity(questId) {
@@ -4285,6 +4368,10 @@ $$(".tab").forEach((tab) => {
   });
   localStorage.setItem('kairu_skills_cleared_v1', 'true');
 })();
+
+if (!localStorage.getItem('questContributors')) {
+  localStorage.setItem('questContributors', JSON.stringify([]));
+}
 
 loadState();
 maybeBacklogEcho(); // Echo: flag a high quest backlog on load (no XP awarded)
