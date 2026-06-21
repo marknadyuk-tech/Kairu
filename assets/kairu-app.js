@@ -861,6 +861,7 @@ const els = {
   questDue: $("#questDue"),
   questPrimarySkill: $("#questPrimarySkillInput"),
   questSupportSkills: $("#questSupportSkillsInput"),
+  questXpType: $("#questXpTypeInput"),
   questDescription: $("#questDescription"),
   noteModal: $("#noteModal"),
   noteXP: $("#noteXP"),
@@ -1188,6 +1189,33 @@ function getSkillXP() {
   return (state.skills || []).reduce((sum, skill) => sum + (Number(skill.xp) || 0), 0);
 }
 
+// Earning economy a quest feeds on completion.
+//   command   -> Competence XP (+ linked skill XP)   [default]
+//   spiritual -> Spiritual XP only
+//   mixed     -> Competence XP + Spiritual XP + linked skill XP
+const QUEST_XP_TYPES = ["command", "spiritual", "mixed"];
+
+function normalizeXpType(value) {
+  const v = String(value || "").trim().toLowerCase();
+  // "competence" is the legacy stored value for command-economy quests.
+  if (v === "competence") return "command";
+  return QUEST_XP_TYPES.includes(v) ? v : "command";
+}
+
+// SXP banked by completed spiritual / mixed quests.
+function getQuestSpiritualXP() {
+  return (state.archivedQuests || []).reduce((sum, quest) => sum + (Number(quest.sxp_earned) || 0), 0);
+}
+
+// SXP banked by spiritual / mixed quests completed on a specific date.
+function getQuestSpiritualXPOn(dateString = localToday()) {
+  return (state.archivedQuests || []).reduce((sum, quest) => {
+    return (quest.date_completed === dateString)
+      ? sum + (Number(quest.sxp_earned) || 0)
+      : sum;
+  }, 0);
+}
+
 // Discipline categories that count as spiritual cultivation. Completing one of
 // these disciplines feeds Spiritual XP (SXP) so prayer / faith / spiritual reps
 // produce visible spiritual progression, not just generic XP.
@@ -1229,7 +1257,7 @@ function getDisciplineSpiritualXPOn(dateString = localToday()) {
 
 function getSpiritualXP() {
   const practicesSXP = (state.spiritualPractices || []).reduce((sum, practice) => sum + calculateSXP(practice), 0);
-  return practicesSXP + getDisciplineSpiritualXP();
+  return practicesSXP + getDisciplineSpiritualXP() + getQuestSpiritualXP();
 }
 
 function getDevelopmentTotals() {
@@ -1367,6 +1395,7 @@ function openQuest() {
   refreshQuestSkillOptions();
   if (els.questPrimarySkill) els.questPrimarySkill.value = "";
   if (els.questSupportSkills) els.questSupportSkills.value = "";
+  if (els.questXpType) els.questXpType.value = "command";
   els.questDescription.value = "";
   document.getElementById('questMinutes').value = '';
   document.getElementById('questQuality').value = '1.00';
@@ -1459,6 +1488,7 @@ function saveQuest() {
   const baseXP = computeDoc10XP();
   const primarySkill = els.questPrimarySkill ? els.questPrimarySkill.value.trim() || null : null;
   const supportSkills = parseSkillList(els.questSupportSkills ? els.questSupportSkills.value : "", primarySkill);
+  const xpType = normalizeXpType(els.questXpType ? els.questXpType.value : "command");
 
   const due = els.questDue.value;
   const today = localToday();
@@ -1479,9 +1509,10 @@ function saveQuest() {
     due_date: due,
     date_completed: null,
     status: "In Progress",
-    xpType: "competence",
+    xpType,
     xp_earned: 0,
     cxp_earned: 0,
+    sxp_earned: 0,
     primarySkill,
     supportSkills,
     skillXpEarned: {},
@@ -1606,38 +1637,50 @@ function completeQuest(questId) {
 
   quest.date_completed = localToday();
   quest.status = "Completed";
-  const rawCXP = XP_ENGINE.calculateCXP(questBaseXP(quest), getActiveMultiplier());
   const today = localToday();
-  const capResult = calculatePostableXP(rawCXP, today);
-  const skillXpEarned = XP_ENGINE.allocateKXP(
-    rawCXP,
-    quest.rarity || quest.difficulty,
-    quest.primarySkill,
-    quest.supportSkills
-  );
+
+  // Earning economy for this quest. "command" (default) = Competence XP; some
+  // quests are spiritual and bank Spiritual XP instead; "mixed" banks both.
+  const xpType = normalizeXpType(quest.xpType);
+  const awardsCXP = xpType !== "spiritual";          // command + mixed
+  const awardsSXP = xpType === "spiritual" || xpType === "mixed";
+  const awardsSkillXP = xpType !== "spiritual";      // spiritual quests don't grow skills
+
+  // The quest's earned value, run through the shared daily-cap engine so the
+  // rank total stays Doc-10 compliant regardless of which economy it feeds.
+  const rawValue = XP_ENGINE.calculateCXP(questBaseXP(quest), getActiveMultiplier());
+  const capResult = calculatePostableXP(rawValue, today);
+
+  const skillXpEarned = awardsSkillXP
+    ? XP_ENGINE.allocateKXP(rawValue, quest.rarity || quest.difficulty, quest.primarySkill, quest.supportSkills)
+    : {};
   const totalKXP = Object.values(skillXpEarned).reduce((sum, value) => sum + (Number(value) || 0), 0);
-  quest.xpType = "competence";
+
+  quest.xpType = xpType;
   quest.xp_earned = capResult.postedXP;
-  quest.cxp_earned = rawCXP;
+  quest.cxp_earned = awardsCXP ? rawValue : 0;
+  quest.sxp_earned = awardsSXP ? rawValue : 0;
   quest.raw_xp = capResult.rawXP;
-  quest.raw_cxp = rawCXP;
+  quest.raw_cxp = rawValue;
   quest.xp_band = capResult.band;
   quest.skillXpEarned = skillXpEarned;
   applySkillXPAllocation(skillXpEarned);
   state.totalXP += capResult.postedXP;
   recordDailyXP(capResult.rawXP, capResult.postedXP, today);
+  const economy = awardsCXP && awardsSXP ? "CXP+SXP" : awardsSXP ? "SXP" : "CXP";
   recordXPEvent(
     'quest',
-    rawCXP,
-    rawCXP,
-    'competence',
+    rawValue,
+    rawValue,
+    xpType,
     {
       questTitle: quest.title,
       rarity: quest.rarity || quest.difficulty,
-      economy: "CXP",
+      economy,
       legacyPostedXP: capResult.postedXP,
       legacyBand: capResult.band,
       kxpEarned: totalKXP,
+      sxpEarned: quest.sxp_earned,
       primarySkill: quest.primarySkill || null,
       supportSkills: quest.supportSkills || []
     }
@@ -1657,12 +1700,15 @@ function completeQuest(questId) {
     : capResult.band === 'overflow'
     ? ` // legacy cap posted +${capResult.postedXP}`
     : '';
-  showXPFlash(`+${rawCXP.toLocaleString()} CXP`);
+  const earnedParts = [];
+  if (awardsCXP) earnedParts.push(`+${rawValue.toLocaleString()} CXP`);
+  if (awardsSXP) earnedParts.push(`+${rawValue.toLocaleString()} SXP`);
+  showXPFlash(earnedParts.join("  "));
   const skillBreakdown = formatSkillXPBreakdown(skillXpEarned);
   const skillMsg = skillBreakdown
     ? ` // ${skillBreakdown}`
     : (totalKXP ? ` // +${totalKXP.toLocaleString()} KXP` : "");
-  showToast(`Chronicled // +${rawCXP.toLocaleString()} CXP${skillMsg}${bandMsg}`);
+  showToast(`Chronicled // ${earnedParts.join(" // ")}${skillMsg}${bandMsg}`);
 
   promptContributor(questId);
 }
@@ -2478,8 +2524,10 @@ function buildCoachBrief() {
   if (progressionQuests.length) {
     progressionQuests.forEach(q => {
       const cxp = Number(q.cxp_earned ?? q.xp_earned) || 0;
+      const sxp = Number(q.sxp_earned) || 0;
       L.push(`- Completed Quest: ${q.title}${q.date_completed ? ` (${q.date_completed})` : ""}`);
       L.push(`  CXP Earned: ${cxp.toLocaleString()}`);
+      if (sxp) L.push(`  SXP Earned: ${sxp.toLocaleString()}`);
       const skillEntries = (q.skillXpEarned && typeof q.skillXpEarned === "object")
         ? Object.entries(q.skillXpEarned).filter(([, v]) => (Number(v) || 0) > 0).sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0))
         : [];
@@ -2493,7 +2541,8 @@ function buildCoachBrief() {
   } else {
     L.push("- No completions chronicled yet.");
   }
-  const sxpToday = (typeof getDisciplineSpiritualXPOn === "function") ? getDisciplineSpiritualXPOn() : 0;
+  const sxpToday = ((typeof getDisciplineSpiritualXPOn === "function") ? getDisciplineSpiritualXPOn() : 0)
+    + ((typeof getQuestSpiritualXPOn === "function") ? getQuestSpiritualXPOn() : 0);
   L.push(`- Spiritual XP logged today: ${sxpToday.toLocaleString()}`);
   L.push("");
 
@@ -2867,11 +2916,13 @@ function questTemplate(quest) {
   const flagBtn = (!quest.serendipity_flagged && !quest.is_locked)
     ? `<button class="btn ghost" type="button" data-action="flag-serendipity" data-id="${escapeHTML(quest.id)}">Flag Serendipity</button>`
     : "";
+  const qType = normalizeXpType(quest.xpType);
+  const xpLabel = qType === "spiritual" ? "SXP" : qType === "mixed" ? "CXP+SXP" : "CXP";
   return `
     <article class="quest-card quest-card--v">
       <div class="quest-card__top">
         <span class="pill ${difficultyClass(rarity)}">${escapeHTML(rarity)}</span>
-        <span class="xp">${questBaseXP(quest).toLocaleString()} CXP</span>
+        <span class="xp">${questBaseXP(quest).toLocaleString()} ${xpLabel}</span>
       </div>
       <h4 class="quest-title">${escapeHTML(quest.title)}</h4>
       <div class="quest-due">${due}</div>
@@ -2889,6 +2940,13 @@ function archiveTemplate(quest) {
   const skillXP = quest.skillXpEarned && typeof quest.skillXpEarned === "object"
     ? Object.values(quest.skillXpEarned).reduce((sum, value) => sum + (Number(value) || 0), 0)
     : 0;
+  const cxp = Number(quest.cxp_earned ?? quest.xp_earned) || 0;
+  const sxp = Number(quest.sxp_earned) || 0;
+  const earnedParts = [];
+  if (cxp) earnedParts.push(`+${cxp.toLocaleString()} CXP`);
+  if (sxp) earnedParts.push(`+${sxp.toLocaleString()} SXP`);
+  if (skillXP) earnedParts.push(`+${skillXP.toLocaleString()} KXP`);
+  if (!earnedParts.length) earnedParts.push(`+0 CXP`);
   return `
     <article class="quest-card archived">
       <div>
@@ -2899,7 +2957,7 @@ function archiveTemplate(quest) {
           <span>${escapeHTML(quest.completion_note || "")}</span>
         </div>
       </div>
-      <span class="xp earned">+${(Number(quest.cxp_earned ?? quest.xp_earned) || 0).toLocaleString()} CXP${skillXP ? ` // +${skillXP.toLocaleString()} KXP` : ""}</span>
+      <span class="xp earned">${earnedParts.join(" // ")}</span>
     </article>
   `;
 }
@@ -4345,8 +4403,10 @@ document.addEventListener("click", (event) => {
     const quest = state.activeQuests.find(q => q.id === actionTarget.dataset.id);
     if (!quest) return;
     pendingQuestId = actionTarget.dataset.id;
-    const projectedCXP = XP_ENGINE.calculateCXP(questBaseXP(quest), getActiveMultiplier());
-    els.noteXP.textContent = `+${projectedCXP.toLocaleString()} CXP x ${getActiveMultiplier().toFixed(2)} multiplier`;
+    const projected = XP_ENGINE.calculateCXP(questBaseXP(quest), getActiveMultiplier());
+    const qType = normalizeXpType(quest.xpType);
+    const economyLabel = qType === "spiritual" ? "SXP" : qType === "mixed" ? "CXP + SXP" : "CXP";
+    els.noteXP.textContent = `+${projected.toLocaleString()} ${economyLabel} x ${getActiveMultiplier().toFixed(2)} multiplier`;
     els.noteText.value = "";
     showModal(els.noteModal);
   }
