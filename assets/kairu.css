@@ -144,6 +144,18 @@ textarea:focus-visible {
   color: var(--gold);
   margin-top: 4px;
 }
+/* Compact tracking-active boost marker shown beside the rank CXP when today is
+   locked in. Replaces the duplicate "+3% Tracking Active" chip on the Command page. */
+.brand__rank-boost {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--green);
+  margin-top: 3px;
+  text-shadow: 0 0 8px rgba(0, 230, 118, 0.5);
+}
+.brand__rank-boost[hidden] { display: none; }
 
 .kairu-logo {
   width: 50px;
@@ -317,6 +329,9 @@ textarea:focus-visible {
 }
 
 .page-title {
+  /* The current page is now shown in the header subtitle (PHASE 2.5.1 // PAGE),
+     so the large per-page title is redundant and hidden app-wide. */
+  display: none;
   margin: 0;
   font-family: var(--display);
   font-size: clamp(28px, 4vw, 42px);
@@ -576,15 +591,24 @@ textarea:focus-visible {
 }
 
 .track-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
+  /* Slim lock-status rail: sits compact on the right, never blocks main content.
+     The verbose kicker/title/copy is hidden; only the control (Track button or
+     the vertical LOCKED rail) shows. */
+  display: flex;
+  justify-content: flex-end;
   align-items: center;
-  padding: 22px;
+  gap: 12px;
+  padding: 10px 14px;
+  /* Shrink-wrap to the right so it's a compact top-right card, not a full-width
+     band — keeps the main content area clear. */
+  width: fit-content;
+  margin-left: auto;
   border-left: 4px solid var(--cyan);
   background: linear-gradient(90deg, rgba(0, 229, 255, 0.05) 0%, transparent 60%), var(--surface);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
+
+.track-panel__text { display: none; }
 
 .track-panel.locked {
   border-left-color: var(--green);
@@ -2136,22 +2160,26 @@ body.sanctuary-active .app {
   background: linear-gradient(90deg, var(--cyan-soft), transparent);
 }
 .track-locked {
+  /* Vertical slim rail: lock icon stacked over "LOCKED". */
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  border: 1px solid rgba(0, 229, 255, 0.45);
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 230, 118, 0.45);
   border-radius: 10px;
-  background: var(--cyan-soft);
-  color: var(--cyan);
+  background: rgba(0, 230, 118, 0.08);
+  color: var(--green);
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.3;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.12em;
+  text-align: center;
   cursor: default;
   user-select: none;
 }
-.track-locked__lock { font-size: 16px; filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.6)); }
+.track-locked__lock { font-size: 16px; filter: drop-shadow(0 0 6px rgba(0, 230, 118, 0.6)); }
 .track-locked__text b { color: var(--text); font-weight: 600; }
 
 /* --- Ascension Rank prominence + collapsible requirements --- */
@@ -2417,13 +2445,9 @@ body.sanctuary-active .app {
   .panel { padding: 16px; }
   .metrics { gap: 10px; }
 
-  /* Compact tracking card: the base grid already keeps the lock beside the
-     state — just tighten padding/type and preserve the cyan glow. */
-  .track-panel { gap: 12px; padding: 14px 16px; }
-  .track-kicker { font-size: 10px; }
-  .track-title { font-size: 16px; margin: 2px 0; }
-  .track-copy { font-size: 11px; line-height: 1.35; margin-top: 3px; }
-  .track-locked { padding: 8px 12px; font-size: 11px; }
+  /* Slim lock rail stays compact and right-aligned on mobile. */
+  .track-panel { gap: 10px; padding: 8px 12px; }
+  .track-locked { padding: 7px 12px; font-size: 11px; }
 }
 
 /* ============================================================

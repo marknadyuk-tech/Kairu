@@ -405,6 +405,20 @@ function attemptAscend() {
 
 // Concise, actionable titles. The descriptive copy is now a live status line
 // (see viewStatusHTML) so the header surfaces numbers, not restated labels.
+// Header subtitle: "PHASE 2.5.1 // <PAGE>", kept in sync by setView. Short page
+// names so the line stays compact on mobile (not "COMMAND CENTER").
+const PHASE_LABEL = "PHASE 2.5.1";
+const PAGE_SHORT_NAMES = {
+  command: "Command",
+  quests: "Quests",
+  discipline: "Discipline",
+  skills: "Skills",
+  tasks: "Tasks",
+  pipeline: "Pipeline",
+  financial: "Financial",
+  archive: "Chronicle"
+};
+
 const copy = {
   command:   { eyebrow: "KAIRU Command",       title: "Command Center" },
   quests:    { eyebrow: "Quest Board",         title: "Quests" },
@@ -422,16 +436,14 @@ function viewStatusHTML(view) {
   const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
   switch (view) {
     case 'command': {
+      // CXP (top-right rank) and tracking +3% (rank boost marker) are shown once
+      // elsewhere now, so the HUD keeps only the non-duplicated counts.
       const quests = (state.activeQuests || []).length;
       const protocols = (state.disciplines || []).filter(disciplineAppliesToday).length;
-      const cxp = getCompetenceXP();
-      const tracked = isTrackedToday();
       const chip = (val, label, cls) => `<span class="cmd-hud__chip${cls ? ' ' + cls : ''}"><b>${val}</b>${label}</span>`;
       return `<span class="cmd-hud">${
         chip(quests, 'Active Quests')}${
-        chip(protocols, 'Protocols Today')}${
-        chip(cxp.toLocaleString() + ' ', 'CXP')}${
-        tracked ? chip('+3%', 'Tracking Active', 'is-live') : chip('OFF', 'Tracking', 'is-off')
+        chip(protocols, 'Protocols Today')
       }</span>`;
     }
     case 'quests':    return escapeHTML(plural((state.activeQuests || []).length, 'active mission'));
@@ -1358,6 +1370,14 @@ function setView(view) {
     els.viewEyebrow.textContent = nextCopy.eyebrow;
     els.viewTitle.textContent = nextCopy.title;
   }
+
+  // Dynamic header subtitle: PHASE 2.5.1 // CURRENT PAGE (uppercased via CSS).
+  const subEl = document.getElementById("brandSub");
+  if (subEl) {
+    const pageName = PAGE_SHORT_NAMES[view] || (nextCopy && nextCopy.title) || view;
+    subEl.textContent = `${PHASE_LABEL} // ${pageName}`;
+  }
+
   updateViewStatus();
 
   // Bring the freshly shown view into focus on mobile (content scrolls under header).
@@ -2801,7 +2821,7 @@ function renderMetrics() {
   const dueSoon = dueSoonCount();
   const totals = getDevelopmentTotals();
 
-  els.metricCXP.textContent = totals.cxp.toLocaleString();
+  // CXP total now lives only in the top-right rank display (see renderRank).
   els.metricKXP.textContent = totals.kxp.toLocaleString();
   els.metricSXP.textContent = totals.sxp.toLocaleString();
   els.metricTDS.textContent = totals.tds.toLocaleString();
@@ -2820,13 +2840,16 @@ function renderMetrics() {
 
 function renderDailyXPStatus() {
   const el = document.getElementById('dailyXPStatus');
-  if (!el) return;
+  const big = document.getElementById('metricTodayXP');
 
   const entry = (state.dailyXPLedger || {})[localToday()];
 
   if (!entry) {
-    el.textContent = 'XP TODAY: 0 / 300 prime band open';
-    el.style.color = 'var(--cyan)';
+    if (big) big.textContent = '0';
+    if (el) {
+      el.textContent = 'XP TODAY: 0 / 300 prime band open';
+      el.style.color = 'var(--cyan)';
+    }
     return;
   }
 
@@ -2845,8 +2868,11 @@ function renderDailyXPStatus() {
     color = 'var(--cyan)';
   }
 
-  el.textContent = `XP TODAY: ${posted.toLocaleString()} posted / ${raw.toLocaleString()} raw · ${band}`;
-  el.style.color = color;
+  if (big) big.textContent = posted.toLocaleString();
+  if (el) {
+    el.textContent = `XP TODAY: ${posted.toLocaleString()} posted / ${raw.toLocaleString()} raw · ${band}`;
+    el.style.color = color;
+  }
 }
 
 function renderSerendipity() {
@@ -2880,6 +2906,10 @@ function renderTrack() {
   const badge = document.getElementById("trackLocked");
   if (button) button.hidden = tracked;
   if (badge) badge.hidden = !tracked;
+
+  // Single +3% indicator: a compact boost marker beside the top-right rank CXP.
+  const boost = document.getElementById("brandRankBoost");
+  if (boost) boost.hidden = !tracked;
 }
 
 function renderQuests() {

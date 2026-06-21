@@ -77,9 +77,10 @@
           <span class="brand__rank-label">RANK</span>
           <span class="brand__rank-value" id="brandRankValue">E</span>
           <span class="brand__rank-cxp" id="brandRankCXP">0 CXP</span>
+          <span class="brand__rank-boost" id="brandRankBoost" hidden>&#9650; +3%</span>
         </div>
       </div>
-      <div class="brand__sub">Phase 2 Active // Command Center</div>
+      <div class="brand__sub" id="brandSub">PHASE 2.5.1 // COMMAND</div>
     </div>
 
     <nav class="nav">
@@ -163,7 +164,7 @@
     <section class="view active" id="command" aria-label="Command dashboard">
       <div class="section">
         <div class="track-panel" id="trackPanel">
-          <div>
+          <div class="track-panel__text">
             <div class="track-kicker" id="trackKicker">Daily Tracking</div>
             <h3 class="track-title" id="trackTitle">Intentional tracking inactive</h3>
             <p class="track-copy" id="trackCopy">Lock in today to activate the +3% XP boost on all completions before midnight.</p>
@@ -171,7 +172,7 @@
           <button class="btn cyan" type="button" data-action="track">Track Today</button>
           <div class="track-locked" id="trackLocked" role="status" aria-live="polite" hidden>
             <span class="track-locked__lock" aria-hidden="true">&#128274;</span>
-            <span class="track-locked__text">Tracked<br><b>Locked until midnight</b></span>
+            <span class="track-locked__text">LOCKED</span>
           </div>
         </div>
       </div>
@@ -179,9 +180,9 @@
       <div class="section">
         <div class="grid metrics">
           <article class="card card--primary">
-            <div class="card__label">Primary Focus // Competence XP</div>
-            <div class="card__value gold" id="metricCXP">0</div>
-            <div class="card__meta">Completed quest output // Doc 10 before caps</div>
+            <div class="card__label">Primary Focus // Today's XP</div>
+            <div class="card__value gold" id="metricTodayXP">0</div>
+            <div class="card__meta">Posted XP banked today // Doc 10 caps</div>
             <div class="card__meta" id="dailyXPStatus" style="margin-top:6px;font-family:var(--mono);">XP TODAY: 0 / 300 prime band open</div>
           </article>
           <article class="card">
