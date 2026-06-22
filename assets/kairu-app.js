@@ -1882,6 +1882,25 @@ const ECHO_SOURCE_TYPES = ["quest", "discipline", "task", "manual", "system"];
 
 function normalizeEcho(echo = {}) {
   const importance = Number(echo.importance);
+  // Phase 3 tag migration: accept either the V1 string `patternTag` or the V2
+  // structured `pattern_tag` object. We emit BOTH — `patternTag` stays as a
+  // back-compat mirror still read by the display (echoCardHTML) and the locked
+  // assembleContext output, while `pattern_tag` carries the V2 metadata.
+  const hasV2Tag = echo.pattern_tag && typeof echo.pattern_tag === "object";
+  const tagValue = hasV2Tag
+    ? String(echo.pattern_tag.value || echo.patternTag || "general")
+    : String(echo.patternTag || "general");
+  const tagConfidence = hasV2Tag && Number.isFinite(Number(echo.pattern_tag.confidence))
+    ? Number(echo.pattern_tag.confidence)
+    : 1.0;
+  const patternTagObject = {
+    value: tagValue,
+    assigned_by: hasV2Tag && echo.pattern_tag.assigned_by ? echo.pattern_tag.assigned_by : "PLAYER",
+    confidence: tagConfidence,
+    player_confirmed: hasV2Tag && echo.pattern_tag.player_confirmed != null
+      ? echo.pattern_tag.player_confirmed
+      : null
+  };
   return {
     id: echo.id || createId("echo"),
     createdAt: echo.createdAt || new Date().toISOString(),
@@ -1889,10 +1908,14 @@ function normalizeEcho(echo = {}) {
     sourceId: echo.sourceId != null ? String(echo.sourceId) : null,
     title: String(echo.title || "Untitled Echo"),
     reflection: String(echo.reflection || ""),
-    patternTag: String(echo.patternTag || "general"),
+    patternTag: tagValue,            // back-compat mirror — read by display + assembleContext
+    pattern_tag: patternTagObject,   // V2 structured tag (Phase 3 retrieval metadata)
     suggestedNextAction: String(echo.suggestedNextAction || ""),
     emotionalTone: String(echo.emotionalTone || "neutral"),
-    importance: Number.isFinite(importance) ? Math.min(5, Math.max(1, Math.round(importance))) : 3
+    importance: Number.isFinite(importance) ? Math.min(5, Math.max(1, Math.round(importance))) : 3,
+    weight: Number.isFinite(Number(echo.weight)) ? Number(echo.weight) : 1.0,       // decay scalar for Phase 3 ranking
+    raw_event_ref: Array.isArray(echo.raw_event_ref) ? echo.raw_event_ref : [],     // Phase 3 populates trigger UUIDs
+    domain: echo.domain != null ? echo.domain : null                                // player-assigned later: CAREER|HEALTH|SKILLS|SPIRITUAL|FINANCES
   };
 }
 
