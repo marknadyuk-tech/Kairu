@@ -407,7 +407,7 @@ function attemptAscend() {
 // (see viewStatusHTML) so the header surfaces numbers, not restated labels.
 // Header subtitle: "PHASE 2.5.1 // <PAGE>", kept in sync by setView. Short page
 // names so the line stays compact on mobile (not "COMMAND CENTER").
-const PHASE_LABEL = "PHASE 2.5.1";
+const PHASE_LABEL = "PHASE 2.6";
 const PAGE_SHORT_NAMES = {
   command: "Command",
   quests: "Quests",
@@ -1718,6 +1718,8 @@ function completeQuest(questId) {
   generateQuestEcho(quest); // Echo: reflective log only — no XP awarded
 
   saveState();
+  forceRescan();                 // Phase 2.6: state changed — recompute the snapshot
+  maybeGenerateEveningWitness(); // Phase 2.6: a completed quest may complete the day
   if (els.noteModal.classList.contains("show")) hideModal(els.noteModal);
   renderAll();
   const bandMsg = capResult.band === 'hardstop'
@@ -2023,8 +2025,9 @@ function echoCardHTML(e) {
   const reflection = e.reflection
     ? `<p class="echo-card__reflection">${escapeHTML(e.reflection)}</p>`
     : "";
+  const systemClass = (e.sourceType === "system" || e.source === "system") ? " echo--system" : "";
   return `
-    <article class="echo-card">
+    <article class="echo-card${systemClass}">
       <div class="echo-card__head">
         <h4 class="echo-card__title">${escapeHTML(e.title)}</h4>
         <span class="echo-card__time">${escapeHTML(echoTimeAgo(e.createdAt))}</span>
@@ -2639,6 +2642,11 @@ function buildCoachBrief() {
 
   L.push("## SUGGESTED NEXT 3 ACTIONS");
   coachSuggestedActions().forEach((a, i) => L.push(`${i + 1}. ${a}`));
+
+  // Phase 2.6: the Nervous System snapshot (daily title, trajectory, signals, witness).
+  const livingWorld = buildLivingWorldBriefSection();
+  if (livingWorld) L.push(livingWorld);
+
   L.push("");
   L.push("====================================");
   L.push("END OF BRIEF");
@@ -3291,11 +3299,14 @@ function logDiscipline(disciplineId) {
   const newStreak = getDisciplineStreak(disciplineId);
   if (ECHO_MILESTONES.includes(newStreak)) generateDisciplineEcho(disc, newStreak);
   saveState();
+  forceRescan();                 // Phase 2.6: state changed — recompute the snapshot
+  maybeGenerateEveningWitness(); // Phase 2.6: a logged discipline may complete the day
   renderDisciplines();
   renderEchoes();
   renderReadiness();
   renderMetrics();
   renderCommandBrief();
+  renderLivingWorldCard();       // Phase 2.6: keep the Command card in sync
   renderXPLog();
   const spiritual = isSpiritualDiscipline(disc);
   const xpLabel = spiritual ? ' SXP' : ' XP';
@@ -3771,6 +3782,10 @@ function renderSanctuary() {
           <small>No urgent signals. Study the pattern and choose the next move.</small>
         </li>`;
   }
+
+  // Phase 2.6: enrich with the Nervous System snapshot (daily title, trajectory,
+  // signal-driven call list, recommended action, potential XP).
+  renderSanctuaryWithNS();
 }
 
 function showSanctuary() {
@@ -3969,9 +3984,621 @@ function setActiveTitle(title) {
   showToast(`Title set: ${title}`);
 }
 
+/* ===================== PHASE 2.6 // LIVING WORLD / NERVOUS SYSTEM =====================
+   A read-only computation layer over existing state. It NEVER awards XP, never
+   mutates quests/tasks/disciplines, and never touches the daily-cap engine. It
+   reads the same state of record everything else uses and produces a single
+   advisory snapshot, state.kairuNS, that the Sanctuary + Command views display.
+
+   Field names are bound to the REAL v2.5 schema (verified against this file):
+   - quests:      rarity, due_date, date_completed, cxp_earned / xp_earned
+   - tasks:       completed, completedAt, dueDate, consequence  (+ isTaskOverdue)
+   - disciplines: id, category, xpPerCompletion  (+ hasLoggedToday, isSpiritualDiscipline)
+   - disciplineLog entries: { disciplineId, date }
+   - financials:  { income, expenses, assets, liabilities }
+   - tracking-today: isTrackedToday()   (state.lastTrackDate === localToday())
+   Dates use the canonical localToday(). Echoes use the existing addEcho/echoExists. */
+
+// --- Migration: idempotent, safe to run on every load ---
+function migrateStateForPhase26() {
+  // Step 0: rawInputs patch — archivedQuests must carry raw inputs, not only
+  // computed XP. Pre-2.6 entries get an explicit null marker (null = pre-rawInputs
+  // era, NOT missing data).
+  if (Array.isArray(state.archivedQuests)) {
+    state.archivedQuests = state.archivedQuests.map(q =>
+      q && q.rawInputs === undefined ? { ...q, rawInputs: null } : q
+    );
+  }
+
+  // Step 1: add the unified Nervous System snapshot if missing.
+  if (!state.kairuNS) {
+    state.kairuNS = {
+      scanDate: null,          // "YYYY-MM-DD" — prevents re-scan on the same day
+      dailyTitle: "",
+      trajectory: "Stable",    // Ascending | Stable | Recovering | Under Pressure
+      signals: [],             // Signal[] — max 5
+      prioritySignal: null,
+      pressureScore: 0,        // 0-100
+      opportunityScore: 0,     // 0-100
+      potentialXP: 0,
+      recommendedAction: "",
+      eveningWitness: null,
+      autoEchoDate: null
+    };
+  }
+
+  // Step 2: tag pre-existing echoes as user-authored. The live differentiation of
+  // auto-generated witness echoes keys off sourceType === "system" (the existing
+  // schema), but we set this documented marker for completeness.
+  if (Array.isArray(state.echoes)) {
+    state.echoes = state.echoes.map(echo =>
+      echo && echo.source === undefined ? { ...echo, source: "user" } : echo
+    );
+  }
+
+  saveState();
+}
+
+// --- Small Phase 2.6 helpers bound to the real schema ---
+function nsRarity(q) { return q.rarity || q.difficulty || "Common"; }
+function nsQuestCompletedToday(q, today) {
+  return q && (q.date_completed === today
+    || (typeof q.date_completed === "string" && q.date_completed.startsWith(today))
+    || (typeof q.completedAt === "string" && q.completedAt.startsWith(today)));
+}
+function nsQuestXP(q) { return Number(q.cxp_earned ?? q.xp_earned ?? q.raw_cxp ?? 0) || 0; }
+function getDayOfYear() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const oneDay = 1000 * 60 * 60 * 24;
+  return Math.floor((now - start) / oneDay);
+}
+
+// --- Signal collectors. Pure reads; no state mutation. Return Signal[]. ---
+function collectQuestSignals() {
+  const signals = [];
+  const active = Array.isArray(state.activeQuests) ? state.activeQuests : [];
+  const today = localToday();
+
+  const epicOrLegendary = active.filter(q => {
+    const r = nsRarity(q);
+    return r === "Epic" || r === "Legendary";
+  });
+  if (epicOrLegendary.length > 0) {
+    signals.push({
+      type: "opportunity", severity: 4, source: "quests",
+      message: "High-value quest on the board.",
+      action: "Complete the highest-rarity active quest."
+    });
+  }
+
+  const overdue = active.filter(q => q.due_date && q.due_date < today);
+  if (overdue.length >= 2) {
+    signals.push({
+      type: "threat", severity: 4, source: "quests",
+      message: `${overdue.length} quests past due date.`,
+      action: "Complete or defer the oldest overdue quest."
+    });
+  } else if (overdue.length === 1) {
+    signals.push({
+      type: "warning", severity: 3, source: "quests",
+      message: "One quest past due date.",
+      action: "Complete or defer the overdue quest."
+    });
+  }
+
+  if (active.length >= 6) {
+    signals.push({
+      type: "warning", severity: 2, source: "quests",
+      message: "Quest board accumulating. Thin or complete.",
+      action: "Complete one quest before adding another."
+    });
+  }
+
+  if (active.length === 0) {
+    signals.push({
+      type: "warning", severity: 3, source: "quests",
+      message: "No active quests. Momentum gap.",
+      action: "Deploy a new quest to maintain progression arc."
+    });
+  }
+
+  return signals;
+}
+
+function collectDisciplineSignals() {
+  const signals = [];
+  const today = localToday();
+  const disciplines = Array.isArray(state.disciplines) ? state.disciplines : [];
+  const completedToday = (state.disciplineLog || []).filter(e => e.date === today);
+
+  // Spiritual discipline available but not yet held today.
+  const spiritual = disciplines.filter(isSpiritualDiscipline);
+  const spiritualDone = spiritual.some(d => hasLoggedToday(d.id));
+  if (spiritual.length > 0 && !spiritualDone) {
+    signals.push({
+      type: "spiritual", severity: 3, source: "discipline",
+      message: "Faith protocol available.",
+      action: `Complete ${spiritual[0].name} to restore spiritual momentum.`
+    });
+  }
+
+  // Full stack held vs. not yet started (v2.5 disciplines have no "daily"
+  // frequency flag, so the whole configured stack is the unit of measure).
+  const unlogged = disciplines.filter(d => !hasLoggedToday(d.id));
+  if (disciplines.length > 0 && unlogged.length === 0) {
+    signals.push({
+      type: "momentum", severity: 2, source: "discipline",
+      message: "Full discipline stack completed today.",
+      action: "Discipline complete. Redirect energy to quests."
+    });
+  } else if (disciplines.length > 0 && completedToday.length === 0) {
+    signals.push({
+      type: "warning", severity: 3, source: "discipline",
+      message: "Discipline stack not yet started.",
+      action: "Begin discipline stack to lock in spiritual XP."
+    });
+  }
+
+  return signals;
+}
+
+function collectTaskSignals() {
+  const signals = [];
+  const tasks = (state.tasks || []).filter(t => !t.completed);
+  const overdue = tasks.filter(isTaskOverdue);
+  const highConsequence = tasks.filter(t => t.consequence === "high");
+
+  if (overdue.length >= 3) {
+    signals.push({
+      type: "threat", severity: 4, source: "tasks",
+      message: `${overdue.length} overdue tasks. Pressure rising.`,
+      action: "Clear one overdue task to reduce cognitive load."
+    });
+  } else if (overdue.length > 0) {
+    signals.push({
+      type: "warning", severity: 2, source: "tasks",
+      message: "Overdue tasks present.",
+      action: "Address overdue task before end of day."
+    });
+  }
+
+  if (highConsequence.length > 0) {
+    signals.push({
+      type: "threat", severity: 3, source: "tasks",
+      message: "High-consequence task awaiting action.",
+      action: `Address: ${highConsequence[0].title}`
+    });
+  }
+
+  return signals;
+}
+
+function collectPipelineSignals() {
+  const signals = [];
+  const pipeline = Array.isArray(state.jobPipeline) ? state.jobPipeline : [];
+  const interviews = pipeline.filter(p => p.stage === "Interview");
+  const offers = pipeline.filter(p => p.stage === "Offer");
+  const applied = pipeline.filter(p => p.stage === "Applied");
+
+  if (offers.length > 0) {
+    signals.push({
+      type: "opportunity", severity: 5, source: "pipeline",
+      message: "Offer stage entry requires decision.",
+      action: `Review offer: ${offers[0].company} — ${offers[0].role}`
+    });
+  }
+  if (interviews.length > 0) {
+    signals.push({
+      type: "opportunity", severity: 4, source: "pipeline",
+      message: "Interview stage active. Window open.",
+      action: `Prepare for ${interviews[0].company} interview.`
+    });
+  }
+  if (applied.length > 2) {
+    signals.push({
+      type: "momentum", severity: 2, source: "pipeline",
+      message: "Pipeline active with multiple applications.",
+      action: "Follow up on applications older than 7 days."
+    });
+  }
+  if (pipeline.length === 0) {
+    signals.push({
+      type: "warning", severity: 2, source: "pipeline",
+      message: "Pipeline empty. No opportunities tracked.",
+      action: "Identify and add one target opportunity."
+    });
+  }
+
+  return signals;
+}
+
+function collectFinancialSignals() {
+  const signals = [];
+  const fin = state.financials || {};
+  const income = Number(fin.income || 0);
+  const expenses = Number(fin.expenses || 0);
+  const cashflow = income - expenses;
+
+  if (income > 0 || expenses > 0) {
+    if (cashflow < 0) {
+      signals.push({
+        type: "financial", severity: 5, source: "financial",
+        message: "Negative monthly cash flow detected.",
+        action: "Stabilize financial position. Review income gap."
+      });
+    } else if (cashflow < 500 && income > 0) {
+      signals.push({
+        type: "warning", severity: 3, source: "financial",
+        message: "Cash flow margin thin.",
+        action: "Increase income or reduce variable expenses."
+      });
+    }
+  }
+
+  const liabilities = Number(fin.liabilities || 0);
+  const assets = Number(fin.assets || 0);
+  if (liabilities > 0 && assets > 0 && liabilities > assets * 0.5) {
+    signals.push({
+      type: "financial", severity: 3, source: "financial",
+      message: "Debt-to-asset ratio elevated.",
+      action: "Prioritize liability reduction in Merchant path."
+    });
+  }
+
+  return signals;
+}
+
+function collectSkillSignals() {
+  const signals = [];
+  const skills = Array.isArray(state.skills) ? state.skills : [];
+  const TIER_THRESHOLDS = {
+    acquiring: 1000, beginner: 1000, moderate: 1200, proficient: 1800, expert: 2500
+  };
+
+  const nearTier = skills.filter(skill => {
+    const invested = Number(skill.xp ?? skill.xpInvested ?? 0);
+    const max = Number(skill.xpMax || 0);
+    if (max > 0) return invested >= max * 0.8;
+    const threshold = TIER_THRESHOLDS[String(skill.tier).toLowerCase()] || 1000;
+    return invested >= threshold * 0.8;
+  });
+
+  if (nearTier.length > 0) {
+    signals.push({
+      type: "skill", severity: 2, source: "skills",
+      message: `${nearTier[0].name} approaching tier threshold.`,
+      action: `Complete a skill-linked quest to push ${nearTier[0].name} up.`
+    });
+  }
+  if (skills.length === 0) {
+    signals.push({
+      type: "warning", severity: 1, source: "skills",
+      message: "No skills registered.",
+      action: "Register primary skills to unlock skill XP tracking."
+    });
+  }
+
+  return signals;
+}
+
+// --- Scoring + selection ---
+function calculatePressureScore(signals) {
+  const threats = signals.filter(s => s.type === "threat" || s.type === "financial");
+  const warnings = signals.filter(s => s.type === "warning");
+  let score = 0;
+  threats.forEach(s => score += s.severity * 12);
+  warnings.forEach(s => score += s.severity * 5);
+  if (!isTrackedToday()) score += 10;
+  return Math.min(100, score);
+}
+
+function calculateOpportunityScore(signals) {
+  const opp = signals.filter(s => s.type === "opportunity" || s.type === "momentum" || s.type === "skill");
+  let score = 0;
+  opp.forEach(s => score += s.severity * 12);
+  if (isTrackedToday()) score += 15;
+  return Math.min(100, score);
+}
+
+// Pure function. No state reads.
+function calculateTrajectory(pressureScore, opportunityScore, todayActionCount) {
+  if (pressureScore >= 65) return "Under Pressure";
+  if (todayActionCount > 0 && opportunityScore > 50) return "Ascending";
+  if (todayActionCount > 0 && pressureScore > 40) return "Recovering";
+  return "Stable";
+}
+
+// Estimate of XP still earnable today from the board. Advisory only — the real
+// daily-cap engine governs what actually posts at completion time. Mirrors the
+// Sanctuary's existing potentialXP() + unlogged-discipline sum, with the +3%
+// tracking boost surfaced when tracking is locked.
+function calculatePotentialXP() {
+  const questPotential = (typeof potentialXP === "function") ? potentialXP() : 0;
+  const disciplinePotential = (state.disciplines || [])
+    .filter(d => !hasLoggedToday(d.id))
+    .reduce((sum, d) => sum + (Number(d.xpPerCompletion) || 0), 0);
+  const boost = isTrackedToday() ? 1.03 : 1.0;
+  return Math.round((questPotential + disciplinePotential) * boost);
+}
+
+function selectDailyTitle(dayOfYear, pressureScore) {
+  const TITLE_POOL = [
+    "The Builder's Trial",
+    "Day of Stewardship",
+    "The Long Climb",
+    "Harvest Window",
+    "Recovery Protocol",
+    "The Discipline Gate",
+    "The Merchant's Push",
+    "The Sovereign's Review",
+    "The Faithful Ascent",
+    "The Quiet Battle"
+  ];
+  let index = dayOfYear % TITLE_POOL.length;
+  // Shift toward the pressure-themed titles (indices 4/5) when load is high.
+  if (pressureScore > 65 && index < 4) index = (index + 4) % TITLE_POOL.length;
+  return TITLE_POOL[index];
+}
+
+function selectRecommendedAction(prioritySignal, signals) {
+  if (prioritySignal) return prioritySignal.action;
+  if (!isTrackedToday()) return "Lock in tracking to activate the +3% XP boost.";
+  const activeQuests = state.activeQuests || [];
+  if (activeQuests.length > 0) return "Complete the highest-value active quest.";
+  if ((state.disciplines || []).length > 0) return "Begin discipline stack to lock in spiritual XP.";
+  return "Deploy a quest to begin today's progression arc.";
+}
+
+// --- The single authoritative scan. Replaces the spec's twin functions. ---
+function scanSystem() {
+  if (!state.kairuNS) migrateStateForPhase26();
+  const today = localToday();
+  if (state.kairuNS.scanDate === today) return; // already scanned today
+
+  const allSignals = [
+    ...collectQuestSignals(),
+    ...collectDisciplineSignals(),
+    ...collectTaskSignals(),
+    ...collectPipelineSignals(),
+    ...collectFinancialSignals(),
+    ...collectSkillSignals()
+  ];
+
+  // Highest severity first; stable order preserves collector precedence on ties.
+  const ranked = allSignals.sort((a, b) => b.severity - a.severity).slice(0, 5);
+
+  const pressureScore = calculatePressureScore(ranked);
+  const opportunityScore = calculateOpportunityScore(ranked);
+
+  const archivedToday = (state.archivedQuests || []).filter(q => nsQuestCompletedToday(q, today));
+  const disciplinesToday = (state.disciplineLog || []).filter(e => e.date === today);
+  const tasksToday = (state.tasks || []).filter(t =>
+    t.completed && typeof t.completedAt === "string" && t.completedAt.startsWith(today));
+  const todayActionCount = archivedToday.length + disciplinesToday.length + tasksToday.length;
+
+  const prioritySignal = ranked[0] || null;
+
+  state.kairuNS = {
+    ...state.kairuNS,
+    scanDate: today,
+    dailyTitle: selectDailyTitle(getDayOfYear(), pressureScore),
+    trajectory: calculateTrajectory(pressureScore, opportunityScore, todayActionCount),
+    signals: ranked,
+    prioritySignal,
+    pressureScore,
+    opportunityScore,
+    potentialXP: calculatePotentialXP(),
+    recommendedAction: selectRecommendedAction(prioritySignal, ranked)
+  };
+
+  saveState();
+}
+
+// State has changed (a completion) — recompute even on the same calendar day.
+function forceRescan() {
+  if (!state.kairuNS) migrateStateForPhase26();
+  state.kairuNS.scanDate = null;
+  scanSystem();
+}
+
+// --- Evening Witness + auto Echo ---
+function isMeaningfulActionDay() {
+  const today = localToday();
+  const questsDone = (state.archivedQuests || []).filter(q => nsQuestCompletedToday(q, today)).length;
+  const discsDone = (state.disciplineLog || []).filter(e => e.date === today).length;
+  const tasksDone = (state.tasks || []).filter(t =>
+    t.completed && typeof t.completedAt === "string" && t.completedAt.startsWith(today)).length;
+  return questsDone >= 1 || discsDone >= 2 || tasksDone >= 3;
+}
+
+function maybeGenerateEveningWitness() {
+  if (!state.kairuNS) migrateStateForPhase26();
+  const today = localToday();
+  if (state.kairuNS.eveningWitness && state.kairuNS.eveningWitness.date === today) return;
+
+  // Generate once the day has produced meaningful movement (the hour gate is
+  // relaxed here: a meaningful day is witnessed whenever the user is present).
+  if (!isMeaningfulActionDay()) return;
+
+  const questsDone = (state.archivedQuests || []).filter(q => nsQuestCompletedToday(q, today));
+  const discsDone = (state.disciplineLog || []).filter(e => e.date === today);
+  const tasksDone = (state.tasks || []).filter(t =>
+    t.completed && typeof t.completedAt === "string" && t.completedAt.startsWith(today));
+  const xpEarned = questsDone.reduce((sum, q) => sum + nsQuestXP(q), 0);
+  const totalActions = questsDone.length + discsDone.length + tasksDone.length;
+  const traj = state.kairuNS.trajectory;
+
+  const summaries = {
+    Ascending: `Today produced measurable movement. ${totalActions} actions completed${xpEarned > 0 ? `, +${xpEarned.toLocaleString()} CXP banked` : ', disciplines held'}. Trajectory confirmed ascending.`,
+    Stable: `The loop held. ${totalActions} actions logged. No ground lost — that matters in a long game.`,
+    Recovering: `Recovery confirmed. You returned and executed. ${totalActions} actions completed under pressure. Identity-level evidence.`,
+    "Under Pressure": `Pressure was real today. You still completed ${totalActions} actions. The system registered the effort.`
+  };
+
+  state.kairuNS.eveningWitness = {
+    date: today,
+    completedQuests: questsDone.length,
+    completedDisciplines: discsDone.length,
+    completedTasks: tasksDone.length,
+    xpEarnedToday: xpEarned,
+    trajectory: traj,
+    summary: summaries[traj] || summaries.Stable
+  };
+  saveState();
+
+  maybeCreateAutoEcho(state.kairuNS.eveningWitness);
+}
+
+function maybeCreateAutoEcho(witness) {
+  if (!witness) return;
+  const today = localToday();
+  if (state.kairuNS.autoEchoDate === today) return;
+  const sourceId = `witness#${today}`;
+  if (typeof echoExists === "function" && echoExists("system", sourceId)) {
+    state.kairuNS.autoEchoDate = today;
+    saveState();
+    return;
+  }
+
+  const titles = {
+    Ascending: "Witness Echo // The Loop Held",
+    Stable: "Witness Echo // Presence Confirmed",
+    Recovering: "Witness Echo // Return Protocol",
+    "Under Pressure": "Witness Echo // Held Under Load"
+  };
+
+  addEcho({
+    sourceType: "system",
+    sourceId,
+    source: "system",
+    title: titles[witness.trajectory] || "Witness Echo // Day Logged",
+    reflection: witness.summary,
+    patternTag: witness.trajectory === "Ascending" ? "momentum"
+      : witness.trajectory === "Recovering" ? "resilience" : "discipline",
+    suggestedNextAction: "",
+    emotionalTone: witness.trajectory === "Ascending" ? "driven"
+      : witness.trajectory === "Under Pressure" ? "alert" : "grounded",
+    importance: witness.xpEarnedToday > 200 ? 4 : 3
+  });
+
+  state.kairuNS.autoEchoDate = today;
+  saveState();
+}
+
+// --- Render: Sanctuary enrichment (layers over the existing renderSanctuary) ---
+function renderSanctuaryWithNS() {
+  const ns = state.kairuNS;
+  if (!ns) return;
+
+  const recEl = document.getElementById('sanctuaryRecommended');
+  if (recEl && ns.recommendedAction) recEl.textContent = ns.recommendedAction;
+
+  const xpEl = document.getElementById('sanctuaryAvailableXP');
+  if (xpEl) xpEl.textContent = '+' + Number(ns.potentialXP || 0).toLocaleString();
+
+  const signalList = document.getElementById('sanctuaryCallList');
+  if (signalList && (ns.signals || []).length) {
+    signalList.innerHTML = ns.signals.map(sig =>
+      `<li class="sanctuary__call-item sanctuary__call-item--${sig.type}">
+        <strong>${escapeHTML(sig.message)}</strong>
+        <small>${escapeHTML(sig.action || '')}</small>
+      </li>`
+    ).join('');
+  }
+
+  const titleEl = document.getElementById('sanctuaryDailyTitle');
+  if (titleEl) titleEl.textContent = ns.dailyTitle || '';
+
+  const trajEl = document.getElementById('sanctuaryTrajectory');
+  if (trajEl) {
+    trajEl.textContent = ns.trajectory || 'Stable';
+    trajEl.className = `sanctuary__trajectory trajectory-badge trajectory-badge--${String(ns.trajectory || 'stable').toLowerCase().replace(/\s+/g, '-')}`;
+  }
+}
+
+// --- Render: Living World card, injected into the Command view ---
+function renderLivingWorldCard() {
+  const ns = state.kairuNS;
+  if (!ns) return;
+
+  let card = document.getElementById('livingWorldCard');
+  if (!card) {
+    const briefSection = document.getElementById('commandBriefSection');
+    if (!briefSection || !briefSection.parentNode) return;
+    card = document.createElement('div');
+    card.id = 'livingWorldCard';
+    card.className = 'section';
+    briefSection.parentNode.insertBefore(card, briefSection);
+  }
+
+  const signalItems = (ns.signals || []).slice(0, 4).map(sig =>
+    `<span class="lw-signal lw-signal--${sig.type}">${escapeHTML(sig.message)}</span>`
+  ).join('');
+
+  const threat = (ns.signals || []).find(s => s.type === "threat" || s.type === "financial");
+  const opportunity = (ns.signals || []).find(s => s.type === "opportunity" || s.type === "momentum");
+  const trajClass = String(ns.trajectory || 'stable').toLowerCase().replace(/\s+/g, '-');
+
+  card.innerHTML = `
+    <div class="section-head">
+      <div>
+        <h3 class="section-title">Living World</h3>
+        <p class="section-note">${escapeHTML(ns.dailyTitle || '')}</p>
+      </div>
+      <span class="trajectory-badge trajectory-badge--${trajClass}">${escapeHTML(ns.trajectory || 'Stable')}</span>
+    </div>
+    <div class="lw-grid">
+      <div class="lw-row">
+        <span class="lw-label">Threat</span>
+        <span class="lw-value">${escapeHTML(threat ? threat.message : 'No active threats detected.')}</span>
+      </div>
+      <div class="lw-row">
+        <span class="lw-label">Opportunity</span>
+        <span class="lw-value">${escapeHTML(opportunity ? opportunity.message : 'System monitoring active.')}</span>
+      </div>
+      <div class="lw-row">
+        <span class="lw-label">Recommended</span>
+        <span class="lw-value lw-value--action">${escapeHTML(ns.recommendedAction || '')}</span>
+      </div>
+      <div class="lw-row">
+        <span class="lw-label">Potential Today</span>
+        <span class="lw-value lw-value--xp">+${Number(ns.potentialXP || 0).toLocaleString()} CXP available</span>
+      </div>
+    </div>
+    <div class="lw-signals">${signalItems}</div>
+  `;
+}
+
+// --- Coach Brief: appended system-state block ---
+function buildLivingWorldBriefSection() {
+  const ns = state.kairuNS;
+  if (!ns) return '';
+  const witness = ns.eveningWitness;
+  const signalLines = (ns.signals || []).map((s, i) =>
+    `  ${i + 1}. [${s.type.toUpperCase()}] ${s.message}`
+  ).join('\n');
+
+  return [
+    '',
+    '## KAIRU SYSTEM STATE',
+    `- Daily Title: ${ns.dailyTitle || 'Not generated'}`,
+    `- Trajectory: ${ns.trajectory}`,
+    `- Pressure Score: ${ns.pressureScore}/100`,
+    `- Opportunity Score: ${ns.opportunityScore}/100`,
+    `- Potential CXP Today: +${ns.potentialXP}`,
+    `- Recommended Action: ${ns.recommendedAction}`,
+    '- Signals:',
+    signalLines || '  None detected.',
+    `- Priority Signal: ${ns.prioritySignal ? ns.prioritySignal.message : 'None'}`,
+    `- Evening Witness: ${witness ? `[${witness.date}] ${witness.summary} (CXP earned: ${witness.xpEarnedToday})` : 'Not yet generated today'}`
+  ].join('\n');
+}
+
 function renderAll() {
   renderTrack();
   renderCommandBrief();
+  renderLivingWorldCard(); // Phase 2.6: Living World card in the Command view
   renderIdentity();
   renderMetrics();
   renderQuests();
@@ -4680,6 +5307,9 @@ if (!localStorage.getItem('questContributors')) {
 }
 
 loadState();
+migrateStateForPhase26();      // Phase 2.6: idempotent state migration (must run first)
+scanSystem();                  // Phase 2.6: build today's Nervous System snapshot
+maybeGenerateEveningWitness(); // Phase 2.6: witness + auto-echo if the day was meaningful
 maybeBacklogEcho(); // Echo: flag a high quest backlog on load (no XP awarded)
 maybeTaskBacklogEcho(); // Echo: flag high task backlog on load (no XP awarded)
 saveState();

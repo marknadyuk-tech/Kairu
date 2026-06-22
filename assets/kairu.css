@@ -2540,3 +2540,35 @@ body.sanctuary-active .app {
             mask-image: linear-gradient(180deg, #000 55%, transparent);
   }
 }
+
+/* ===================== PHASE 2.6 // LIVING WORLD ===================== */
+/* Living World card (Command view) */
+.lw-grid { display: grid; gap: 8px; margin: 12px 0; }
+.lw-row { display: flex; gap: 12px; align-items: baseline; }
+.lw-label { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-muted); min-width: 100px; flex-shrink: 0; }
+.lw-value { font-size: 13px; color: var(--text); line-height: 1.4; }
+.lw-value--action { color: var(--cyan); }
+.lw-value--xp { color: var(--gold); font-family: var(--mono); }
+.lw-signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.lw-signal { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; padding: 3px 8px; border-radius: 3px; background: rgba(255,255,255,.05); color: var(--text-dim); }
+.lw-signal--threat { border-left: 2px solid var(--red); color: var(--red); }
+.lw-signal--opportunity { border-left: 2px solid var(--gold); color: var(--gold); }
+.lw-signal--momentum { border-left: 2px solid var(--cyan); }
+.lw-signal--spiritual { border-left: 2px solid rgba(180, 140, 255, .7); color: rgba(180, 140, 255, .85); }
+.lw-signal--financial { border-left: 2px solid var(--red); }
+.lw-signal--skill { border-left: 2px solid var(--cyan); }
+.lw-signal--warning { border-left: 2px solid rgba(255, 200, 60, .7); color: rgba(255, 200, 60, .85); }
+
+/* Trajectory badge */
+.trajectory-badge { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; padding: 3px 10px; border-radius: 3px; }
+.trajectory-badge--ascending { background: rgba(0,229,160,.12); color: var(--cyan); border: 1px solid rgba(0,229,160,.3); }
+.trajectory-badge--stable { background: rgba(255,255,255,.06); color: var(--text-dim); border: 1px solid rgba(255,255,255,.1); }
+.trajectory-badge--recovering { background: rgba(255,200,60,.08); color: rgba(255,200,60,.85); border: 1px solid rgba(255,200,60,.2); }
+.trajectory-badge--under-pressure { background: rgba(220,50,50,.1); color: var(--red); border: 1px solid rgba(220,50,50,.25); }
+
+/* Sanctuary additions */
+.sanctuary__daily-title { font-family: var(--mono); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--text-muted); margin-top: 6px; }
+.sanctuary__trajectory { display: inline-block; margin-top: 8px; }
+
+/* System (auto-generated) echo differentiation */
+.echo--system { border-left: 2px solid rgba(0,229,160,.3); opacity: .9; }
