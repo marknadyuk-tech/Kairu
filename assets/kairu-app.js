@@ -3185,6 +3185,46 @@ function getDisciplineStreak(disciplineId) {
   return streak;
 }
 
+// Phase 2.6.5: getDisciplineStreak() walks backward from TODAY and breaks
+// immediately if today isn't logged yet — so it reports 0 all day, every
+// day, until you log. That's correct for the existing milestone-on-log check
+// (called right after pushing today's entry), but wrong for a day-start
+// near-miss read taken BEFORE logging: we need "the run as it stands ending
+// yesterday" to say "you're one rep from tying it." Same walk, starts one
+// day earlier.
+function getDisciplineStreakAsOfYesterday(disciplineId) {
+  const loggedDates = new Set(
+    state.disciplineLog
+      .filter(e => e.disciplineId === disciplineId)
+      .map(e => e.date)
+  );
+  let streak = 0;
+  const cursor = new Date();
+  cursor.setDate(cursor.getDate() - 1);
+  while (true) {
+    const dateStr = cursor.getFullYear() + '-'
+      + String(cursor.getMonth() + 1).padStart(2, '0') + '-'
+      + String(cursor.getDate()).padStart(2, '0');
+    if (!loggedDates.has(dateStr)) break;
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+// Phase 2.6.5: persists each discipline's all-time best streak so the
+// day-start Moment Voice can make a TRUE "passes your best ever" claim
+// instead of an arbitrary milestone. Returns the current best (post-update).
+function updateDisciplineRecord(disciplineId) {
+  if (!state.disciplineRecords) state.disciplineRecords = {};
+  const streak = getDisciplineStreak(disciplineId);
+  const prevBest = (state.disciplineRecords[disciplineId] || {}).bestStreak || 0;
+  if (streak > prevBest) {
+    state.disciplineRecords[disciplineId] = { bestStreak: streak };
+  }
+  return Math.max(streak, prevBest);
+}
+
 function getCalendarCells(disciplineId, days) {
   const cells = [];
   const today = localToday();
@@ -3298,6 +3338,7 @@ function logDiscipline(disciplineId) {
   // Echo: streak milestone reflection (no XP awarded)
   const newStreak = getDisciplineStreak(disciplineId);
   if (ECHO_MILESTONES.includes(newStreak)) generateDisciplineEcho(disc, newStreak);
+  updateDisciplineRecord(disciplineId); // Phase 2.6.5: keep the best-streak ledger current
   saveState();
   forceRescan();                 // Phase 2.6: state changed — recompute the snapshot
   maybeGenerateEveningWitness(); // Phase 2.6: a logged discipline may complete the day
@@ -3804,6 +3845,19 @@ function dismissSanctuary() {
   document.body.classList.remove("sanctuary-active");
 }
 
+// Phase 2.6.5: the 5-signal list defaults to collapsed so the single Moment
+// Voice line reads as the focal point; this just reveals the existing list.
+function toggleSanctuarySignals(toggleBtn) {
+  const list = document.getElementById("sanctuaryCallList");
+  if (!list) return;
+  const nowHidden = !list.hidden;
+  list.hidden = nowHidden;
+  if (toggleBtn) {
+    toggleBtn.textContent = nowHidden ? "Show all signals" : "Hide signals";
+    toggleBtn.setAttribute("aria-expanded", String(!nowHidden));
+  }
+}
+
 function renderXPLog() {
   const container = document.getElementById('xpLogFeed');
   if (!container) return;
@@ -4024,7 +4078,8 @@ function migrateStateForPhase26() {
       potentialXP: 0,
       recommendedAction: "",
       eveningWitness: null,
-      autoEchoDate: null
+      autoEchoDate: null,
+      momentVoice: null        // Phase 2.6.5: { momentType, text, openLoop, computedDate }
     };
   }
 
@@ -4039,6 +4094,11 @@ function migrateStateForPhase26() {
 
   // Amendment: ensure the momentum field exists on already-migrated snapshots.
   if (state.kairuNS && state.kairuNS.momentum === undefined) state.kairuNS.momentum = 0;
+
+  // Phase 2.6.5: ensure momentVoice exists on already-migrated snapshots, and
+  // the best-ever streak ledger exists at all.
+  if (state.kairuNS && state.kairuNS.momentVoice === undefined) state.kairuNS.momentVoice = null;
+  if (!state.disciplineRecords) state.disciplineRecords = {};
 
   saveState();
 }
@@ -4286,6 +4346,130 @@ function collectSkillSignals() {
   return signals;
 }
 
+/* ===================== PHASE 2.6.5 // MOMENT VOICE =====================
+   Day-start near-miss framing. The Sanctuary's signal list reports state;
+   this picks ONE thing currently in motion/uncertain and frames it as a
+   present/future near-miss ("one more closes the week") rather than a flat
+   status readout. It is the prospective counterpart to the Evening Witness
+   (which is strictly retrospective — summarizes what already happened).
+   Because Moment Voice is computed fresh at day-start before today's actions
+   exist, the two are naturally disjoint; a moment never restates something
+   the Witness already closed.
+
+   Ethical guardrail: every candidate below must derive strictly from real,
+   already-computed state (getDisciplineStreak, the disciplineRecords ledger,
+   state.activeQuests, state.jobPipeline, skill XP/tier thresholds). No
+   invented numbers, no random encouragement untethered to actual state. If
+   nothing qualifies, fall back to the existing recommendedAction/
+   prioritySignal, then to the explicit clean-slate acknowledgment — never
+   synthesize false tension. */
+function detectNearMissMoments() {
+  const today = localToday();
+  const moments = [];
+
+  // near-miss-streak: a discipline one rep from tying/passing its all-time
+  // best (best >= 3 so a 1-day "streak" doesn't trivially qualify). Uses the
+  // yesterday-ending streak — getDisciplineStreak() itself reports 0 all day
+  // until today is logged, so it can't answer "what happens if I log today."
+  (state.disciplines || []).forEach(d => {
+    if (hasLoggedToday(d.id)) return; // already logged — no "near" miss left today
+    const streak = getDisciplineStreakAsOfYesterday(d.id);
+    const best = updateDisciplineRecord(d.id);
+    if (streak > 0 && streak + 1 >= best && best >= 3) {
+      moments.push({ momentType: "near-miss-streak", priority: 5,
+        data: { name: d.name, streak, best } });
+    } else if (streak >= 2 && (streak + 1) % 7 === 0) {
+      moments.push({ momentType: "near-miss-streak-week", priority: 3,
+        data: { name: d.name, streak } });
+    }
+  });
+
+  // near-miss-skill-tier: reuses the same 80%-of-max heuristic as
+  // collectSkillSignals, narrowed to a tighter near-miss band (85%+).
+  (state.skills || []).forEach(skill => {
+    const invested = Number(skill.xp ?? skill.xpInvested ?? 0);
+    const max = Number(skill.xpMax || 0);
+    if (max > 0 && invested < max && invested >= max * 0.85) {
+      moments.push({ momentType: "near-miss-skill-tier", priority: 4,
+        data: { name: skill.name, remaining: max - invested } });
+    }
+  });
+
+  // quest-about-to-expire: due within 2 days but NOT yet overdue — disjoint
+  // from collectQuestSignals' overdue check (due_date < today).
+  (state.activeQuests || []).forEach(q => {
+    if (!q.due_date || q.due_date < today) return;
+    const daysOut = Math.round((new Date(q.due_date) - new Date(today)) / 86400000);
+    if (daysOut >= 0 && daysOut <= 2) {
+      moments.push({ momentType: "quest-about-to-expire", priority: 4,
+        data: { title: q.title, daysOut } });
+    }
+  });
+
+  // pipeline-stale: Applied-stage entries with no movement in 7+ days,
+  // reusing the same stage-filter pattern collectPipelineSignals uses.
+  (state.jobPipeline || []).filter(p => p.stage === "Applied").forEach(p => {
+    if (!p.dateAdded) return;
+    const daysSince = Math.round((new Date(today) - new Date(p.dateAdded)) / 86400000);
+    if (daysSince >= 7) {
+      moments.push({ momentType: "pipeline-stale", priority: 2,
+        data: { company: p.company, days: daysSince } });
+    }
+  });
+
+  return moments;
+}
+
+// Highest-priority moment wins; falls back to the existing prioritySignal,
+// then to an explicit clean-slate acknowledgment. Always returns something.
+function selectMomentType(moments, prioritySignal) {
+  if (moments.length) {
+    return moments.slice().sort((a, b) => b.priority - a.priority)[0];
+  }
+  if (prioritySignal) {
+    return { momentType: "generic-priority", priority: 1, data: { prioritySignal } };
+  }
+  return { momentType: "clean-slate", priority: 0, data: {} };
+}
+
+// 2-3 hand-written voice variants per moment type. Selection is deterministic
+// (rotation index), never random — same substance, varied framing day to day.
+const MOMENT_TEMPLATES = {
+  "near-miss-streak": [
+    (d) => `${d.name} is at ${d.streak}. One more passes your best ever.`,
+    (d) => `${d.streak} days on ${d.name} — your record is ${d.best}. Today decides it.`
+  ],
+  "near-miss-streak-week": [
+    (d) => `${d.name} is at ${d.streak}. One more closes the week.`,
+    (d) => `${d.streak} days held on ${d.name}. A full week is one rep away.`
+  ],
+  "near-miss-skill-tier": [
+    (d) => `${d.name} is one push from its next tier.`,
+    (d) => `${Math.round(d.remaining).toLocaleString()} XP from a tier-up on ${d.name}.`
+  ],
+  "quest-about-to-expire": [
+    (d) => `"${d.title}" closes in ${d.daysOut} day${d.daysOut === 1 ? "" : "s"}.`,
+    (d) => `One sitting left on "${d.title}" before it's overdue.`
+  ],
+  "pipeline-stale": [
+    (d) => `${d.company} has gone quiet for ${d.days} days.`,
+    (d) => `No movement on ${d.company} in ${d.days} days. Worth a nudge.`
+  ],
+  "generic-priority": [
+    (d) => d.prioritySignal.action
+  ],
+  "clean-slate": [
+    () => "Nothing urgent today. That's a position, not a gap.",
+    () => "Quiet board. Use it on something without a deadline."
+  ]
+};
+
+function craftDayStartMessage(momentType, data, rotationSeed) {
+  const pool = MOMENT_TEMPLATES[momentType] || MOMENT_TEMPLATES["clean-slate"];
+  const index = ((rotationSeed % pool.length) + pool.length) % pool.length;
+  return { text: pool[index](data), openLoop: null };
+}
+
 // --- Scoring + selection ---
 function calculatePressureScore(signals) {
   const threats = signals.filter(s => s.type === "threat" || s.type === "financial");
@@ -4419,6 +4603,13 @@ function scanSystem() {
   const todayActionCount = archivedToday.length + disciplinesToday.length + tasksToday.length;
 
   const prioritySignal = ranked[0] || null;
+  const recommendedAction = selectRecommendedAction(prioritySignal, ranked);
+
+  // Phase 2.6.5: pick the single day-start moment, independent rotation seed
+  // from dailyTitle's so the two don't always drift together.
+  const moments = detectNearMissMoments();
+  const chosenMoment = selectMomentType(moments, prioritySignal);
+  const voice = craftDayStartMessage(chosenMoment.momentType, chosenMoment.data, getDayOfYear() + 3);
 
   state.kairuNS = {
     ...state.kairuNS,
@@ -4431,7 +4622,13 @@ function scanSystem() {
     opportunityScore,
     momentum,
     potentialXP: calculatePotentialXP(),
-    recommendedAction: selectRecommendedAction(prioritySignal, ranked)
+    recommendedAction,
+    momentVoice: {
+      momentType: chosenMoment.momentType,
+      text: voice.text,
+      openLoop: voice.openLoop,
+      computedDate: today
+    }
   };
 
   saveState();
@@ -4557,6 +4754,10 @@ function renderSanctuaryWithNS() {
     trajEl.textContent = ns.trajectory || 'Stable';
     trajEl.className = `sanctuary__trajectory trajectory-badge trajectory-badge--${String(ns.trajectory || 'stable').toLowerCase().replace(/\s+/g, '-')}`;
   }
+
+  // Phase 2.6.5: the single day-start moment — the focal line of the overlay.
+  const moveEl = document.getElementById('sanctuaryMomentVoice');
+  if (moveEl && ns.momentVoice) moveEl.textContent = ns.momentVoice.text;
 }
 
 // --- Render: Living World card, injected into the Command view ---
@@ -5146,6 +5347,7 @@ document.addEventListener("click", (event) => {
   if (action === 'pipeline-stage') advancePipelineStage(actionTarget.dataset.id, actionTarget.dataset.stage);
   if (action === 'log-discipline') logDiscipline(actionTarget.dataset.id);
   if (action === "dismiss-sanctuary") dismissSanctuary();
+  if (action === "toggle-signals") toggleSanctuarySignals(actionTarget);
   if (action === "ascend") attemptAscend();
   if (action === 'set-title') setActiveTitle(actionTarget.dataset.title);
   if (action === "open-echo") openEcho();

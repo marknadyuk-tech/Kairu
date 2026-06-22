@@ -2572,3 +2572,28 @@ body.sanctuary-active .app {
 
 /* System (auto-generated) echo differentiation */
 .echo--system { border-left: 2px solid rgba(0,229,160,.3); opacity: .9; }
+
+/* ===================== PHASE 2.6.5 // MOMENT VOICE ===================== */
+.sanctuary__moment-voice {
+  margin: 10px 0 0;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: 17px;
+  line-height: 1.4;
+  letter-spacing: .01em;
+}
+
+.sanctuary__call-toggle {
+  display: inline-block;
+  margin-top: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.sanctuary__call-toggle:hover { color: var(--gold); }
