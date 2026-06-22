@@ -4020,6 +4020,7 @@ function migrateStateForPhase26() {
       prioritySignal: null,
       pressureScore: 0,        // 0-100
       opportunityScore: 0,     // 0-100
+      momentum: 0,             // 0-100 — forward drive (tracking + completions + streaks)
       potentialXP: 0,
       recommendedAction: "",
       eveningWitness: null,
@@ -4035,6 +4036,9 @@ function migrateStateForPhase26() {
       echo && echo.source === undefined ? { ...echo, source: "user" } : echo
     );
   }
+
+  // Amendment: ensure the momentum field exists on already-migrated snapshots.
+  if (state.kairuNS && state.kairuNS.momentum === undefined) state.kairuNS.momentum = 0;
 
   saveState();
 }
@@ -4301,10 +4305,46 @@ function calculateOpportunityScore(signals) {
   return Math.min(100, score);
 }
 
-// Pure function. No state reads.
-function calculateTrajectory(pressureScore, opportunityScore, todayActionCount) {
+// Amendment: forward-drive score (0-100). Reads real state — completions/streaks.
+function collectMomentumScore() {
+  const today = localToday();
+  let score = 0;
+
+  // Tracking active today.
+  if (isTrackedToday()) score += 20;
+
+  // Disciplines completed today: +10 each, capped at 30.
+  const discsToday = (state.disciplineLog || []).filter(e => e.date === today).length;
+  score += Math.min(discsToday * 10, 30);
+
+  // Quests completed in the trailing 7-day window: +15 each, capped at 30.
+  const weekAgo = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6); // inclusive 7-day window (today + prior 6)
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  })();
+  const questsThisWeek = (state.archivedQuests || []).filter(q =>
+    typeof q.date_completed === "string" && q.date_completed >= weekAgo).length;
+  score += Math.min(questsThisWeek * 15, 30);
+
+  // Longest active discipline streak above 3 days: +5 per day over 3, capped at 20.
+  const disciplines = Array.isArray(state.disciplines) ? state.disciplines : [];
+  const longestStreak = disciplines.reduce((max, d) => {
+    const s = (typeof getDisciplineStreak === "function") ? getDisciplineStreak(d.id) : 0;
+    return s > max ? s : max;
+  }, 0);
+  if (longestStreak > 3) score += Math.min((longestStreak - 3) * 5, 20);
+
+  return Math.min(100, score);
+}
+
+// Pure function. No state reads. Momentum is the third parameter.
+function calculateTrajectory(pressureScore, opportunityScore, momentum, todayActionCount) {
   if (pressureScore >= 65) return "Under Pressure";
-  if (todayActionCount > 0 && opportunityScore > 50) return "Ascending";
+  if (todayActionCount > 0 && opportunityScore > 50 && momentum > 40) return "Ascending";
   if (todayActionCount > 0 && pressureScore > 40) return "Recovering";
   return "Stable";
 }
@@ -4370,6 +4410,7 @@ function scanSystem() {
 
   const pressureScore = calculatePressureScore(ranked);
   const opportunityScore = calculateOpportunityScore(ranked);
+  const momentum = collectMomentumScore();
 
   const archivedToday = (state.archivedQuests || []).filter(q => nsQuestCompletedToday(q, today));
   const disciplinesToday = (state.disciplineLog || []).filter(e => e.date === today);
@@ -4383,11 +4424,12 @@ function scanSystem() {
     ...state.kairuNS,
     scanDate: today,
     dailyTitle: selectDailyTitle(getDayOfYear(), pressureScore),
-    trajectory: calculateTrajectory(pressureScore, opportunityScore, todayActionCount),
+    trajectory: calculateTrajectory(pressureScore, opportunityScore, momentum, todayActionCount),
     signals: ranked,
     prioritySignal,
     pressureScore,
     opportunityScore,
+    momentum,
     potentialXP: calculatePotentialXP(),
     recommendedAction: selectRecommendedAction(prioritySignal, ranked)
   };
@@ -4586,6 +4628,7 @@ function buildLivingWorldBriefSection() {
     `- Trajectory: ${ns.trajectory}`,
     `- Pressure Score: ${ns.pressureScore}/100`,
     `- Opportunity Score: ${ns.opportunityScore}/100`,
+    `- Momentum: ${ns.momentum ?? 0}/100`,
     `- Potential CXP Today: +${ns.potentialXP}`,
     `- Recommended Action: ${ns.recommendedAction}`,
     '- Signals:',
