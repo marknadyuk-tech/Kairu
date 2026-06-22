@@ -1710,6 +1710,11 @@ function completeQuest(questId) {
       supportSkills: quest.supportSkills || []
     }
   );
+  // rawInputs is captured once in saveQuest() at creation time (minutes,
+  // quality, K/P/A from the quest form) and must survive into the archive
+  // untouched — it used to be clobbered here with an all-null stub right
+  // before archiving, which destroyed the real values at the worst possible
+  // moment. Do not reset it here.
   quest.is_locked = true;
 
   state.archivedQuests.unshift(quest);
