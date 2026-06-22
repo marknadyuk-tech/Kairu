@@ -1882,25 +1882,43 @@ const ECHO_SOURCE_TYPES = ["quest", "discipline", "task", "manual", "system"];
 
 function normalizeEcho(echo = {}) {
   const importance = Number(echo.importance);
-  // Phase 3 tag migration: accept either the V1 string `patternTag` or the V2
-  // structured `pattern_tag` object. We emit BOTH — `patternTag` stays as a
-  // back-compat mirror still read by the display (echoCardHTML) and the locked
-  // assembleContext output, while `pattern_tag` carries the V2 metadata.
-  const hasV2Tag = echo.pattern_tag && typeof echo.pattern_tag === "object";
-  const tagValue = hasV2Tag
-    ? String(echo.pattern_tag.value || echo.patternTag || "general")
-    : String(echo.patternTag || "general");
-  const tagConfidence = hasV2Tag && Number.isFinite(Number(echo.pattern_tag.confidence))
-    ? Number(echo.pattern_tag.confidence)
-    : 1.0;
-  const patternTagObject = {
-    value: tagValue,
-    assigned_by: hasV2Tag && echo.pattern_tag.assigned_by ? echo.pattern_tag.assigned_by : "PLAYER",
-    confidence: tagConfidence,
-    player_confirmed: hasV2Tag && echo.pattern_tag.player_confirmed != null
-      ? echo.pattern_tag.player_confirmed
-      : null
+
+  // Phase 3 structured tags. Accept three shapes without breaking (exit #1):
+  //   (a) `pattern_tags` already an array     -> re-normalize each entry's shape
+  //   (b) `patternTag` string, comma-separated -> split into one object per value
+  //   (c) neither                             -> empty array
+  // `patternTag` (string) is kept as a back-compat mirror still read by the
+  // display (echoCardHTML) and the locked assembleContext output.
+  const toTagObject = (value, src) => {
+    const o = src && typeof src === "object" ? src : {};
+    return {
+      value: String(value).trim(),
+      assigned_by: o.assigned_by || "PLAYER",
+      confidence: Number.isFinite(Number(o.confidence)) ? Number(o.confidence) : 1.0,
+      player_confirmed: o.player_confirmed != null ? o.player_confirmed : null
+    };
   };
+
+  let patternTags;
+  if (Array.isArray(echo.pattern_tags)) {
+    patternTags = echo.pattern_tags
+      .map(t => (t && typeof t === "object") ? toTagObject(t.value != null ? t.value : "", t) : toTagObject(t, null))
+      .filter(t => t.value !== "");
+  } else {
+    // Comma-split: "Momentum, user experience" -> two separate tag objects (exit #2).
+    patternTags = String(echo.patternTag || "")
+      .split(",")
+      .map(v => v.trim())
+      .filter(Boolean)
+      .map(v => toTagObject(v, null));
+  }
+
+  // Mirror string for the display + assembleContext readers. Prefer the original
+  // patternTag so cards render identically; else rejoin tag values; else "general".
+  const patternTagMirror = echo.patternTag != null && String(echo.patternTag).trim() !== ""
+    ? String(echo.patternTag)
+    : (patternTags.length ? patternTags.map(t => t.value).join(", ") : "general");
+
   return {
     id: echo.id || createId("echo"),
     createdAt: echo.createdAt || new Date().toISOString(),
@@ -1908,8 +1926,8 @@ function normalizeEcho(echo = {}) {
     sourceId: echo.sourceId != null ? String(echo.sourceId) : null,
     title: String(echo.title || "Untitled Echo"),
     reflection: String(echo.reflection || ""),
-    patternTag: tagValue,            // back-compat mirror — read by display + assembleContext
-    pattern_tag: patternTagObject,   // V2 structured tag (Phase 3 retrieval metadata)
+    patternTag: patternTagMirror,    // back-compat mirror — read by display + assembleContext
+    pattern_tags: patternTags,       // V2 structured tags array (Phase 3 retrieval metadata)
     suggestedNextAction: String(echo.suggestedNextAction || ""),
     emotionalTone: String(echo.emotionalTone || "neutral"),
     importance: Number.isFinite(importance) ? Math.min(5, Math.max(1, Math.round(importance))) : 3,
