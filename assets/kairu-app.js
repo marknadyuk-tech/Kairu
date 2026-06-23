@@ -1209,6 +1209,14 @@ function normalizeState(raw) {
 let pendingScenarioFallbackState = null;
 
 function loadState() {
+  // A scenario whose persist just failed (quota) sets this. It is the INTENDED
+  // state, so it must win over whatever stale blob may still sit in localStorage —
+  // otherwise the 20-year fallback shows the prior scenario instead. (Only ever set
+  // in test mode; null on every normal boot, so this is a no-op in production.)
+  if (pendingScenarioFallbackState) {
+    state = normalizeState(pendingScenarioFallbackState);
+    return;
+  }
   // Browser/IDB path: a blob preloaded from IndexedDB takes precedence. Test/Node
   // path: idbPreloadedRaw stays null and we read localStorage exactly as before.
   try {
@@ -1229,11 +1237,7 @@ function loadState() {
       if (ls) { state = normalizeState(ls); return; }
     } catch (e) { /* ignore and fall through */ }
   }
-  if (pendingScenarioFallbackState) {
-    state = normalizeState(pendingScenarioFallbackState);
-  } else {
-    state = structuredClone(defaultState);
-  }
+  state = structuredClone(defaultState);
 }
 
 // Storage write guard. localStorage.setItem throws when the origin quota is
@@ -1818,11 +1822,30 @@ function findQuestIndex(id) {
 }
 
 // ============================================================
-// DAILY XP CAP ENGINE (Doc 10 compliance)
-// Soft cap: 300 raw XP/day posts at 100%
-// Overflow: 301-500 raw XP/day posts at 50%
-// Hard stop: above 500 raw XP/day posts at 0%
+// DAILY XP CAP ENGINE (Doc 10 compliance — CLAUDE.md §8)
+// Caps are RANK-SCALED (DAILY_CAP is a function of player rank, not a constant):
+//   0 .. fullEfficiencyCap        posts at 100%
+//   fullEfficiencyCap .. halfCeil posts at 50%
+//   above halfEfficiencyCeiling   posts at 0%
 // ============================================================
+
+// Per-rank { full: fullEfficiencyCap, half: halfEfficiencyCeiling } from §8.
+const DAILY_XP_CAPS = {
+  F:   { full: 300,  half: 500 },
+  E:   { full: 350,  half: 550 },
+  D:   { full: 450,  half: 700 },
+  C:   { full: 600,  half: 900 },
+  B:   { full: 800,  half: 1200 },
+  A:   { full: 1100, half: 1650 },
+  S:   { full: 1500, half: 2250 },
+  SS:  { full: 2000, half: 3000 },
+  SSS: { full: 3000, half: 4500 }
+};
+
+function getDailyCaps() {
+  const rank = (state.identity && state.identity.tier) || 'F';
+  return DAILY_XP_CAPS[rank] || DAILY_XP_CAPS.F;
+}
 
 function getDailyRawXP(dateString) {
   const ledger = state.dailyXPLedger || {};
@@ -1830,10 +1853,15 @@ function getDailyRawXP(dateString) {
   return entry ? (Number(entry.rawXP) || 0) : 0;
 }
 
-function calculatePostableXP(rawXP, dateString) {
+function calculatePostableXP(rawXP, dateString, options = {}) {
+  // Legendary quest exemption (§8): full XP, no daily cap applies at any rank.
+  if (options.exempt) {
+    return { rawXP, postedXP: rawXP, band: 'exempt' };
+  }
   const alreadyToday = getDailyRawXP(dateString);
-  const softCap = 300;
-  const hardCap = 500;
+  const caps = getDailyCaps();
+  const softCap = caps.full;
+  const hardCap = caps.half;
 
   if (alreadyToday >= hardCap) {
     return { rawXP, postedXP: 0, band: 'hardstop' };
@@ -1870,12 +1898,15 @@ function ensureTrackedToday() {
   return true;
 }
 
-function recordDailyXP(rawXP, postedXP, dateString) {
+function recordDailyXP(rawXP, postedXP, dateString, options = {}) {
   ensureTrackedToday();
   if (!state.dailyXPLedger) state.dailyXPLedger = {};
   const existing = state.dailyXPLedger[dateString] || { rawXP: 0, postedXP: 0 };
   state.dailyXPLedger[dateString] = {
-    rawXP: existing.rawXP + rawXP,
+    // Exempt (Legendary) XP posts in full but must NOT consume the daily cap pool,
+    // so it is excluded from the cap-relevant rawXP accumulator. It still counts
+    // toward posted totals for the day's display.
+    rawXP: existing.rawXP + (options.exempt ? 0 : rawXP),
     postedXP: existing.postedXP + postedXP
   };
 }
@@ -1916,8 +1947,11 @@ function completeQuest(questId) {
 
   // The quest's earned value, run through the shared daily-cap engine so the
   // rank total stays Doc-10 compliant regardless of which economy it feeds.
+  // Legendary quests are exempt from the daily cap (§8): full XP, no cap, and they
+  // do not consume the daily pool for other quests.
+  const isLegendaryQuest = String(quest.rarity || quest.difficulty || '').toLowerCase() === 'legendary';
   const rawValue = XP_ENGINE.calculateCXP(questBaseXP(quest), getActiveMultiplier());
-  const capResult = calculatePostableXP(rawValue, today);
+  const capResult = calculatePostableXP(rawValue, today, { exempt: isLegendaryQuest });
 
   const skillXpEarned = awardsSkillXP
     ? XP_ENGINE.allocateKXP(rawValue, quest.rarity || quest.difficulty, quest.primarySkill, quest.supportSkills)
@@ -1934,7 +1968,7 @@ function completeQuest(questId) {
   quest.skillXpEarned = skillXpEarned;
   applySkillXPAllocation(skillXpEarned);
   state.totalXP += capResult.postedXP;
-  recordDailyXP(capResult.rawXP, capResult.postedXP, today);
+  recordDailyXP(capResult.rawXP, capResult.postedXP, today, { exempt: isLegendaryQuest });
   const economy = awardsCXP && awardsSXP ? "CXP+SXP" : awardsSXP ? "SXP" : "CXP";
   recordXPEvent(
     'quest',
@@ -1990,13 +2024,17 @@ function completeQuest(questId) {
 
 function logContribution(questId, contactName, contributionType, note) {
   const contributors = JSON.parse(localStorage.getItem('questContributors') || '[]');
+  // Canonical questContributors entry — CLAUDE.md §9 LOCKED schema. The five core
+  // fields use the exact §9 names; edge_type stays null until V2 pattern detection.
+  // contribution_id / data_source / note are non-conflicting extras carried alongside.
   contributors.push({
+    questId: questId,
+    contributorName: contactName.trim(),
+    contributionType: contributionType,
+    timestamp: KAIRU_TIME.iso(),
+    edge_type: null,
     contribution_id: 'con_' + KAIRU_TIME.nowMs(),
-    contact_name: contactName.trim(),
-    quest_id: questId,
-    contribution_type: contributionType,
     data_source: 'USER_CLAIMED',
-    logged_at: KAIRU_TIME.iso(),
     note: note || null
   });
   localStorage.setItem('questContributors', JSON.stringify(contributors));
@@ -2005,7 +2043,11 @@ function logContribution(questId, contactName, contributionType, note) {
 function getTopContributors(limit = 5) {
   const contributors = JSON.parse(localStorage.getItem('questContributors') || '[]');
   const frequency = contributors.reduce((acc, entry) => {
-    acc[entry.contact_name] = (acc[entry.contact_name] || 0) + 1;
+    // Compatibility read: §9 canonical contributorName, falling back to the legacy
+    // snake_case contact_name for entries written before the schema alignment.
+    const name = entry.contributorName || entry.contact_name;
+    if (!name) return acc;
+    acc[name] = (acc[name] || 0) + 1;
     return acc;
   }, {});
   return Object.entries(frequency)
@@ -2076,7 +2118,10 @@ function flagSerendipity(questId) {
   const quest = state.activeQuests.find((q) => q.id === questId);
   if (!quest || quest.serendipity_flagged || quest.is_locked) return;
 
-  const buffExpiry = KAIRU_TIME.nowMs() + (24 * 60 * 60 * 1000);
+  // Serendipity (DIVERGE) buff window per CLAUDE.md §8: 48-72 hours. Using 72h (the
+  // documented upper bound of the band).
+  const SERENDIPITY_BUFF_HOURS = 72;
+  const buffExpiry = KAIRU_TIME.nowMs() + (SERENDIPITY_BUFF_HOURS * 60 * 60 * 1000);
   state.serendipity = {
     buffExpiry,
     multiplier: 1.5,
@@ -3187,11 +3232,12 @@ function renderDailyXPStatus() {
   const big = document.getElementById('metricTodayXP');
 
   const entry = (state.dailyXPLedger || {})[localToday()];
+  const caps = getDailyCaps();
 
   if (!entry) {
     if (big) big.textContent = '0';
     if (el) {
-      el.textContent = 'XP TODAY: 0 / 300 prime band open';
+      el.textContent = `XP TODAY: 0 / ${caps.full.toLocaleString()} prime band open`;
       el.style.color = 'var(--cyan)';
     }
     return;
@@ -3201,10 +3247,10 @@ function renderDailyXPStatus() {
   const posted = Number(entry.postedXP) || 0;
 
   let band, color;
-  if (raw >= 500) {
+  if (raw >= caps.half) {
     band = 'CAP REACHED';
     color = 'var(--red)';
-  } else if (raw > 300) {
+  } else if (raw > caps.full) {
     band = 'OVERFLOW';
     color = 'var(--gold)';
   } else {
@@ -4998,9 +5044,12 @@ function forceRescan() {
 // checkNamebindTrigger() — wired at the end of scanSystem(); fires once per
 // genuine nervous-system update cycle (init + forceRescan).
 // Minimum tracked days before the Namebind ceremony may interrupt the Player.
-const NAMEBIND_MIN_TRACKED_DAYS = 7;
+// Raised for beta: the ceremony is non-dismissible and sits over the app, so it must
+// not interrupt early/mid exploration or rank-up testing. It fires only once a player
+// is genuinely established (≥30 active days AND a real body of completed work).
+const NAMEBIND_MIN_TRACKED_DAYS = 30;
 // Minimum count of well-formed completed quests required as evidence.
-const NAMEBIND_MIN_VALID_QUESTS = 3;
+const NAMEBIND_MIN_VALID_QUESTS = 12;
 
 // Evidence-quality gate for the Namebind ceremony. A quest counts only if it
 // has a real title, a parseable completion date, and rawInputs that are either
@@ -6587,6 +6636,10 @@ function buildLongHorizonScenario(name, options = {}) {
 
 function writeScenarioToStorage(scenario) {
   LONG_HORIZON_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  // Clear the main state key BEFORE attempting the (possibly quota-failing) write,
+  // so a failed write cannot leave a previous scenario's blob behind for loadState()
+  // to pick up instead of the intended fallback. (20-year quota fallback fix.)
+  localStorage.removeItem(STORAGE_KEY);
   const primary = safeSetLocalStorage(STORAGE_KEY, JSON.stringify(scenario.state));
   if (!primary.ok) {
     handleStorageWriteFailure(primary);
