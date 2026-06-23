@@ -6091,3 +6091,328 @@ window.setTimeout(() => {
   els.boot.classList.add("gone");
   if (sessionStorage.getItem("kairu_sanctuary_dismissed") !== "true") showSanctuary();
 }, 1200);
+
+/* ============================================================================
+   PHASE 3 // AI ROUTING CONTRACT  (skeleton — NO live API calls)
+   ----------------------------------------------------------------------------
+   Embryonic Phase 3 API surface, per the assembleContext spec v1.0.
+
+   NAMING NOTE — read before touching:
+   The spec names its context builder `assembleContext()`. This file ALREADY
+   ships a different, LOCKED `assembleContext()` (~line 539, exported as
+   window.kairuContext; see CLAUDE.md §6) that returns a state snapshot consumed
+   by the boot console.log and the echo back-compat mirror. Re-declaring
+   `assembleContext` would silently overwrite that locked contract and break
+   those consumers — a FAIL condition in the spec. So the Phase 3 context
+   builder lives here as `assembleAIContext()` and is published at the
+   spec-mandated address `window.KAIRU.assembleContext`. The legacy
+   assembleContext() / window.kairuContext is left untouched.
+
+   Field reads are bound to the REAL v2.5 schema (verified against this file),
+   not the spec's placeholder keys, per spec §08 ("adapt to the live schema;
+   the spec's field names are targets, not overrides"). Live-schema deviations:
+     - nervousSystem.recommendation  <- state.kairuNS.recommendedAction
+     - nervousSystem.momentum         <- kairuNS.momentum is 0–100 live; normalized to the schema's 0–1 scalar
+     - nervousSystem.trajectory       <- live enum (Ascending|Stable|Recovering|Under Pressure), surfaced as-is
+     - quest deadline / completion    <- due_date / (date_completed||completedAt); xp = cxp_earned ?? xp_earned
+     - archivedQuests are unshift()ed (newest first) → recent = slice(0,3), NOT slice(-3)
+     - disciplines have no .streak/.log → streak via getDisciplineStreak(id),
+       completion via getCalendarCells(id, days)
+     - financial                       <- state.financials (+ incomeConfig fallback); no incomeLog/expenses.total exist
+     - skills carry tier + xp, not a numeric level
+   Pure function. No side effects. No localStorage writes. Graceful on empty state.
+   ========================================================================== */
+
+const CONTEXT_SCHEMA_VERSION = '1.0';
+
+function assembleAIContext() {
+  const s = state || {};
+  const ns = s.kairuNS || {};
+  const archivedQuests = Array.isArray(s.archivedQuests) ? s.archivedQuests : [];
+  const activeQuests = Array.isArray(s.activeQuests) ? s.activeQuests : [];
+  const disciplines = Array.isArray(s.disciplines) ? s.disciplines : [];
+  const pipeline = Array.isArray(s.jobPipeline) ? s.jobPipeline : [];
+  const skills = Array.isArray(s.skills) ? s.skills : [];
+  const financials = s.financials || {};
+  const incomeConfig = s.incomeConfig || {};
+
+  // Namebind ceremony writes standalone localStorage keys (NOT inside the state
+  // blob). Read defensively so a fresh install returns clean defaults.
+  const ls = (typeof localStorage !== 'undefined') ? localStorage : { getItem: () => null };
+  const sovereignName = ls.getItem('kairu_namebind_sovereign_name') || 'Player';
+  const commandTitle = ls.getItem('kairu_namebind_command_title') || '';
+  const namebindActive = ls.getItem('kairu_namebind_active') === 'true';
+  const coachPermission = ls.getItem('kairu_namebind_coach_permission') || 'passive';
+  const voiceMode = ls.getItem('kairu_namebind_voice_mode') || 'default';
+  const namebindDate = ls.getItem('kairu_namebind_date') || null;
+  const ceremonyText = ls.getItem('kairu_namebind_ceremony_text') || null;
+
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000);
+  const parseDate = (v) => {
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  // --- META ---
+  const meta = {
+    contextVersion: CONTEXT_SCHEMA_VERSION,
+    assembledAt: now.toISOString(),
+    playerId: sovereignName,
+    sovereignName,
+    commandTitle,
+    namebindActive,
+    coachPermission,
+    voiceMode
+  };
+
+  // --- NERVOUS SYSTEM (state.kairuNS — Phase 2.6 Living World snapshot) ---
+  const rawMomentum = Number(ns.momentum) || 0;            // live scale: 0–100
+  const nervousSystem = {
+    pressureScore: Number(ns.pressureScore) || 0,
+    opportunityScore: Number(ns.opportunityScore) || 0,
+    momentum: Math.max(0, Math.min(1, rawMomentum / 100)), // schema contract: 0–1 scalar
+    trajectory: ns.trajectory || 'Stable',                 // live enum, surfaced as-is
+    recommendation: ns.recommendedAction || null,
+    topSignals: (Array.isArray(ns.signals) ? ns.signals : []).slice(0, 3)
+  };
+
+  // --- QUESTS ---
+  const overdueQuests = activeQuests.filter(q => {
+    const due = parseDate(q && (q.due_date || q.deadline));
+    return due && due < now;
+  });
+
+  const recentlyCompleted = archivedQuests
+    .filter(q => {
+      const done = parseDate(q && (q.date_completed || q.completedAt));
+      return done && done > sevenDaysAgo;
+    })
+    .slice(0, 3) // archivedQuests are unshift()ed → newest first
+    .map(q => ({
+      title: q.title,
+      xpEarned: Number(q.cxp_earned ?? q.xp_earned) || 0,
+      xpType: q.xpType || null
+    }));
+
+  const rarityOrder = ['legendary', 'epic', 'rare', 'uncommon', 'common'];
+  const rarityRank = (q) => {
+    const idx = rarityOrder.indexOf(String((q && (q.rarity || q.difficulty)) || 'common').toLowerCase());
+    return idx === -1 ? rarityOrder.length : idx;
+  };
+  const activeHighPriority = activeQuests.slice()
+    .sort((a, b) => rarityRank(a) - rarityRank(b))
+    .slice(0, 3)
+    .map(q => ({ title: q.title, rarity: q.rarity || q.difficulty || 'Common', xpType: q.xpType || null }));
+
+  const quests = {
+    activeCount: activeQuests.length,
+    overdueCount: overdueQuests.length,
+    totalArchived: archivedQuests.length,
+    recentlyCompleted,
+    activeHighPriority
+  };
+
+  // --- DISCIPLINES (streak/completion come from helpers, not stored fields) ---
+  const activeDisciplines = disciplines.filter(d => d && d.active !== false);
+  const streakOf = (d) => (typeof getDisciplineStreak === 'function' ? getDisciplineStreak(d.id) : 0) || 0;
+  const streaks = activeDisciplines.map(streakOf);
+  const currentStreakAvg = streaks.length
+    ? Math.round(streaks.reduce((a, b) => a + b, 0) / streaks.length)
+    : 0;
+  // Missed = a non-completed day in the last 7, excluding today (today is still
+  // actionable, not yet a miss). getCalendarCells has no schedule flag, so this
+  // counts any non-logged prior day in the window.
+  const recentMissedDays = activeDisciplines.reduce((total, d) => {
+    const cells = (typeof getCalendarCells === 'function') ? getCalendarCells(d.id, 7) : [];
+    return total + cells.filter(c => !c.completed && !c.isToday).length;
+  }, 0);
+  const topDisciplines = activeDisciplines.slice()
+    .sort((a, b) => streakOf(b) - streakOf(a))
+    .slice(0, 3)
+    .map(d => ({ name: d.name, streak: streakOf(d) }));
+
+  const disciplinesContext = {
+    activeCount: activeDisciplines.length,
+    currentStreakAvg,
+    recentMissedDays,
+    topDisciplines
+  };
+
+  // --- FINANCIAL (state.financials; incomeConfig fallback for contracted wage) ---
+  const reportedIncome = Number(financials.income) || 0;
+  const contractedMonthly = Math.round(
+    (Number(incomeConfig.hourlyRate) || 0) * (Number(incomeConfig.baseHours) || 0) * 52 / 12
+  );
+  const monthlyIncome = reportedIncome > 0 ? reportedIncome : contractedMonthly;
+  const monthlyExpenses = Number(financials.expenses) || 0;
+  const coverageRatio = monthlyExpenses > 0
+    ? Math.round((monthlyIncome / monthlyExpenses) * 100) / 100
+    : 0;
+  const incomeGap = Math.max(0, monthlyExpenses - monthlyIncome);
+
+  const financial = {
+    monthlyIncome,
+    monthlyExpenses,
+    coverageRatio,
+    incomeGap,
+    trend: 'unknown' // Phase 3: derive from income history
+  };
+
+  // --- PIPELINE (PIPELINE_STAGES = Identified|Applied|Interview|Offer) ---
+  const byStage = { identified: 0, applied: 0, interview: 0, offer: 0 };
+  pipeline.forEach(item => {
+    const stage = String((item && item.stage) || 'identified').toLowerCase();
+    if (byStage[stage] !== undefined) byStage[stage]++;
+  });
+  const advancedItems = pipeline
+    .filter(item => ['interview', 'offer'].includes(String((item && item.stage) || '').toLowerCase()))
+    .slice(0, 3)
+    .map(item => ({ title: item.company || item.role || item.title || 'Untitled', stage: item.stage }));
+
+  const pipelineContext = {
+    totalItems: pipeline.length,
+    byStage,
+    advancedItems
+  };
+
+  // --- SKILLS (live skills carry tier + xp, not a numeric level) ---
+  const topByLevel = skills.slice()
+    .sort((a, b) => (Number(b.xp) || 0) - (Number(a.xp) || 0))
+    .slice(0, 3)
+    .map(sk => ({ name: sk.name, tier: sk.tier || null, xp: Number(sk.xp) || 0 }));
+
+  const skillsContext = {
+    totalTracked: skills.length,
+    topByLevel
+  };
+
+  // --- NAMEBIND ---
+  const namebind = {
+    active: namebindActive,
+    date: namebindDate,
+    ceremonyText
+  };
+
+  return {
+    meta,
+    nervousSystem,
+    quests,
+    disciplines: disciplinesContext,
+    financial,
+    pipeline: pipelineContext,
+    skills: skillsContext,
+    namebind,
+    routing: {
+      queryClassification: null,    // populated by classifyQuery() via queryKAIRU()
+      recommendedHemisphere: null   // 'left' | 'right' | 'bicameral'
+    }
+  };
+}
+
+// Routing classifier. Heuristic for the skeleton; Phase 3 swaps in a lightweight
+// model call. Pure function — no state reads.
+function classifyQuery(userInput) {
+  if (!userInput || typeof userInput !== 'string') return 'analytical';
+
+  const input = userInput.toLowerCase();
+
+  const psychologicalSignals = [
+    'feel', 'feeling', 'motivation', 'drift', 'stuck', 'lost', 'purpose',
+    'worth', 'identity', 'meaning', 'afraid', 'anxious', 'burnout',
+    'discipline', 'habit', 'why am i', 'should i', 'who am i'
+  ];
+
+  const analyticalSignals = [
+    'how much', 'calculate', 'track', 'data', 'score', 'income', 'xp',
+    'quest', 'pipeline', 'skill level', 'streak', 'budget', 'progress',
+    'compare', 'chart', 'number', 'rank', 'tier', 'statistics'
+  ];
+
+  const psychScore = psychologicalSignals.filter(sig => input.includes(sig)).length;
+  const analyScore = analyticalSignals.filter(sig => input.includes(sig)).length;
+
+  if (psychScore > 0 && analyScore > 0) return 'bicameral';
+  if (psychScore > analyScore) return 'psychological';
+  return 'analytical'; // default to analytical when ambiguous
+}
+
+// Left hemisphere (analytical). STUB — Phase 3 routes to Gemini with context
+// injection. Returns: { hemisphere, response, confidence, tokensUsed }.
+async function callLeftBrain(context, userInput) {
+  console.log('[KAIRU] callLeftBrain stub called. Phase 3 will route to Gemini.');
+  return {
+    hemisphere: 'left',
+    response: '[Left brain stub — Gemini integration pending Phase 3]',
+    confidence: 0,
+    tokensUsed: 0
+  };
+}
+
+// Right hemisphere (psychological). STUB — Phase 3 routes to the Anthropic API
+// with context injection. Returns: { hemisphere, response, confidence, tokensUsed }.
+async function callRightBrain(context, userInput) {
+  console.log('[KAIRU] callRightBrain stub called. Phase 3 will route to Claude API.');
+  return {
+    hemisphere: 'right',
+    response: '[Right brain stub — Claude API integration pending Phase 3]',
+    confidence: 0,
+    tokensUsed: 0
+  };
+}
+
+// DESIGN GATE (unresolved — see spec §09). Conflict-resolution rule for
+// bicameral outputs is parked. Default behavior: left brain wins. Do NOT build
+// arbitration logic until the gate is answered in Phase 3.
+function arbitrate(leftResponse, rightResponse) {
+  console.warn('[KAIRU] arbitrate() called with default left-wins rule. Design gate unresolved.');
+  return leftResponse;
+}
+
+// Single entry point for all AI queries: assemble context, classify, route, return.
+async function queryKAIRU(userInput) {
+  const context = assembleAIContext();
+  const classification = classifyQuery(userInput);
+
+  // Map classification -> hemisphere per the schema's documented enum.
+  const hemisphere = classification === 'psychological' ? 'right'
+    : classification === 'bicameral' ? 'bicameral'
+    : 'left';
+  context.routing.queryClassification = classification;
+  context.routing.recommendedHemisphere = hemisphere;
+
+  if (classification === 'analytical') {
+    const response = await callLeftBrain(context, userInput);
+    return { context, response };
+  }
+
+  if (classification === 'psychological') {
+    const response = await callRightBrain(context, userInput);
+    return { context, response };
+  }
+
+  if (classification === 'bicameral') {
+    const [leftResponse, rightResponse] = await Promise.all([
+      callLeftBrain(context, userInput),
+      callRightBrain(context, userInput)
+    ]);
+    const response = arbitrate(leftResponse, rightResponse);
+    return { context, response, bothHemispheres: { left: leftResponse, right: rightResponse } };
+  }
+
+  // Fallback
+  const response = await callLeftBrain(context, userInput);
+  return { context, response };
+}
+
+// Phase 3 API surface — exposed for inspection and future agent access.
+// NOTE: window.KAIRU.assembleContext maps to assembleAIContext() (see naming
+// note above); the legacy window.kairuContext stays bound to the original
+// assembleContext(). callLeftBrain/callRightBrain are intentionally NOT exported.
+if (typeof window !== 'undefined') {
+  window.KAIRU = window.KAIRU || {};
+  window.KAIRU.assembleContext = assembleAIContext;
+  window.KAIRU.classifyQuery = classifyQuery;
+  window.KAIRU.queryKAIRU = queryKAIRU;
+}
