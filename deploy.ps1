@@ -6,7 +6,8 @@
 #   Right-click > Run with PowerShell   (or:  powershell -File deploy.ps1)
 
 $ErrorActionPreference = "Stop"
-$src = "C:\Users\Mark\OneDrive\Desktop\KAIRU"
+# Source moved out of OneDrive (2026-06-23) to stop OneDrive dehydrating .git.
+$src = "C:\dev\KAIRU"
 $dst = $PSScriptRoot
 
 Copy-Item "$src\KAIRU v2.5.html"     "$dst\index.html"          -Force
