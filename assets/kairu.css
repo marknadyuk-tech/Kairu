@@ -2597,3 +2597,161 @@ body.sanctuary-active .app {
   cursor: pointer;
 }
 .sanctuary__call-toggle:hover { color: var(--gold); }
+
+/* ===================== PHASE 2.6b // NAMEBIND CEREMONY ===================== */
+
+.namebind-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: namebindFadeIn 0.6s ease forwards;
+}
+@keyframes namebindFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.namebind-modal {
+  max-width: 560px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 2.5rem;
+  border: 1px solid rgba(99, 102, 241, 0.3); /* indigo border */
+  background: #0a0a0f;
+  color: #e2e8f0;
+}
+.namebind-kairu-text {
+  font-size: 0.9rem;
+  line-height: 1.9;
+  color: #94a3b8;
+  white-space: pre-line;
+  margin-bottom: 2rem;
+}
+.namebind-headline {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 1rem;
+  letter-spacing: -0.01em;
+}
+.namebind-cta { width: 100%; margin-top: 0.5rem; }
+
+/* Evidence Cards */
+.namebind-evidence-card {
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  background: rgba(99, 102, 241, 0.05);
+}
+.namebind-evidence-card--ack { border-color: rgba(234, 179, 8, 0.4); }
+.namebind-evidence-card p {
+  font-size: 0.875rem;
+  color: #cbd5e1;
+  line-height: 1.7;
+  margin-bottom: 1rem;
+}
+.namebind-evidence-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+.namebind-evidence-ackmark {
+  font-size: 0.8rem;
+  color: #eab308;
+  letter-spacing: 0.03em;
+}
+.namebind-correction { width: 100%; }
+.namebind-correction label {
+  display: block;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+/* Inputs / fields */
+.namebind-field { margin-bottom: 1.25rem; }
+.namebind-field label {
+  display: block;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 0.4rem;
+  letter-spacing: 0.03em;
+}
+.namebind-input {
+  width: 100%;
+  padding: 0.75rem;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+.namebind-input:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.7);
+}
+
+/* Hold Button */
+.namebind-hold-button {
+  position: relative;
+  width: 100%;
+  padding: 1rem;
+  background: transparent;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  color: #a5b4fc;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.namebind-hold-fill {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 0%;
+  background: rgba(99, 102, 241, 0.25);
+  transition: height 0.05s linear;
+  pointer-events: none;
+}
+.namebind-hold-label { position: relative; z-index: 1; }
+.namebind-hold-button.complete {
+  border-color: #eab308; /* gold on completion */
+  color: #eab308;
+}
+.namebind-hold-hint {
+  text-align: center;
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.75rem;
+}
+
+/* Consent Cards */
+.namebind-consent-option {
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 1.25rem;
+  margin-bottom: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.namebind-consent-option.selected {
+  border-color: rgba(99, 102, 241, 0.7);
+  background: rgba(99, 102, 241, 0.08);
+}
+.namebind-consent-option h4 {
+  font-size: 0.95rem;
+  color: #e2e8f0;
+  margin-bottom: 0.25rem;
+}
+.namebind-consent-option p {
+  font-size: 0.8rem;
+  color: #64748b;
+}

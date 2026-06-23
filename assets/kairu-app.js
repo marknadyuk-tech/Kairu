@@ -2693,6 +2693,10 @@ function buildCoachBrief() {
   const livingWorld = buildLivingWorldBriefSection();
   if (livingWorld) L.push(livingWorld);
 
+  // Phase 2.6b: Namebind covenant block (only after the ceremony completes).
+  const namebindBlock = getNamebindCoachBriefBlock();
+  if (namebindBlock) L.push(namebindBlock);
+
   L.push("");
   L.push("====================================");
   L.push("END OF BRIEF");
@@ -4624,7 +4628,13 @@ function selectRecommendedAction(prioritySignal, signals) {
 function scanSystem() {
   if (!state.kairuNS) migrateStateForPhase26();
   const today = localToday();
-  if (state.kairuNS.scanDate === today) return; // already scanned today
+  if (state.kairuNS.scanDate === today) {
+    // Already scanned today — but the Namebind threshold may already be crossed
+    // (e.g. on a fresh page load of an already-scanned day). Evaluate the trigger
+    // anyway; checkNamebindTrigger() is self-guarded and never double-fires.
+    checkNamebindTrigger();
+    return;
+  }
 
   const allSignals = [
     ...collectQuestSignals(),
@@ -4678,6 +4688,7 @@ function scanSystem() {
   };
 
   saveState();
+  checkNamebindTrigger(); // Phase 2.6 hook — fires after each nervous-system update
 }
 
 // State has changed (a completion) — recompute even on the same calendar day.
@@ -4685,6 +4696,472 @@ function forceRescan() {
   if (!state.kairuNS) migrateStateForPhase26();
   state.kairuNS.scanDate = null;
   scanSystem();
+}
+
+/* ===================== PHASE 2.6b // NAMEBIND CEREMONY =====================
+   A one-time identity ceremony, gated by the Living World layer (not by time).
+   It fires once per product lifecycle when a meaningful nervous-system signal
+   is first crossed, runs a five-state modal, writes the kairu_namebind_* keys,
+   flips KAIRU's voice mode, and generates the First Named Quest.
+
+   HARD RULES (from spec):
+   - Awards ZERO XP anywhere in this flow.
+   - Never fires a second time once kairu_namebind_active === 'true'.
+   - Modal is non-dismissible (no X, no outside-click, no Escape).
+   - State reads bind to the REAL v2.5 schema: state.kairuNS / state.archivedQuests
+     (the spec's localStorage reads are the same data via the state-of-record).
+   - The nine kairu_namebind_* keys are written as standalone localStorage keys,
+     Supabase-ready (namebind_events table). They are NOT part of the state blob. */
+
+// checkNamebindTrigger() — wired at the end of scanSystem(); fires once per
+// genuine nervous-system update cycle (init + forceRescan).
+function checkNamebindTrigger() {
+  const namebindActive = localStorage.getItem('kairu_namebind_active') === 'true';
+  if (namebindActive) return;            // already done, never fire again
+  if (namebindModalIsOpen) return;       // ceremony in progress, don't re-fire
+
+  const ns = (state && state.kairuNS) ? state.kairuNS : {};
+  const archivedQuests = Array.isArray(state.archivedQuests) ? state.archivedQuests : [];
+  const hasMinimumData = archivedQuests.length >= 1;
+  const hasMeaningfulSignal = (ns.pressureScore > 15) || (ns.opportunityScore > 15);
+
+  if (hasMinimumData && hasMeaningfulSignal) {
+    // Capture signal context at the moment of trigger.
+    const signalContext = {
+      pressureScore: ns.pressureScore,
+      opportunityScore: ns.opportunityScore,
+      momentum: ns.momentum,
+      triggeredAt: new Date().toISOString(),
+      questCount: archivedQuests.length
+    };
+    localStorage.setItem('kairu_namebind_first_signal_context', JSON.stringify(signalContext));
+    showNamebindModal(signalContext, archivedQuests);
+  }
+}
+
+// Module-level guard: true while the ceremony modal is mounted.
+let namebindModalIsOpen = false;
+
+// --- Evidence cards: KAIRU proves she sees the Player before asking for authority.
+// Generated dynamically from live data — never hardcoded.
+function generateEvidenceCards(signalContext, archivedQuests) {
+  const cards = [];
+
+  // Card 1: quest behavior pattern.
+  const completedCount = archivedQuests.length;
+  cards.push({
+    observation: `You have logged ${completedCount} quest${completedCount !== 1 ? 's' : ''}. The pattern shows a system you return to — not one you abandoned.`,
+    type: 'behavioral'
+  });
+
+  // Card 2: pressure or opportunity signal (whichever is higher).
+  if (signalContext.pressureScore >= signalContext.opportunityScore) {
+    cards.push({
+      observation: `Pressure signal is active (${Math.round(signalContext.pressureScore)}). You are operating under constraint. This is when identity decisions either hold or collapse.`,
+      type: 'signal'
+    });
+  } else {
+    cards.push({
+      observation: `Opportunity signal is active (${Math.round(signalContext.opportunityScore)}). A window is open. Whether you move through it is the question KAIRU is now equipped to track.`,
+      type: 'signal'
+    });
+  }
+
+  // Card 3: momentum reading. v2.5 momentum is a 0-100 scale; normalize to the
+  // spec's 0-1 thresholds so the label reads correctly either way.
+  const rawMomentum = Number(signalContext.momentum) || 0;
+  const m = rawMomentum > 1 ? rawMomentum / 100 : rawMomentum;
+  const momentumLabel = m > 0.6 ? 'building' : m > 0.3 ? 'fragile' : 'recovering';
+  cards.push({
+    observation: `Momentum is ${momentumLabel}. A tracker records this. A sovereign intelligence acts on it.`,
+    type: 'momentum'
+  });
+
+  return cards;
+}
+
+// --- Covenant statement, generated at the seal. No XP, no stored render strings.
+function generateCeremonyText(sovereignName, commandTitle, coachPermission) {
+  const titleLine = commandTitle ? `${sovereignName}, ${commandTitle}` : sovereignName;
+  const permissionLine = coachPermission === 'challenge_enabled'
+    ? 'I will challenge contradiction. I will name drift before you name it yourself.'
+    : 'I will observe and report. The challenge is yours to issue.';
+  return `Then hear the record.
+
+From this point forward, I will not reward motion without consequence.
+I will separate maintenance from progression.
+I will remember your declared identity.
+${permissionLine}
+I will treat completed quests as evidence, not decoration.
+I will not confuse your potential with your current rank.
+
+${titleLine}, your Namebind is active.`;
+}
+
+// --- The five-state modal machine. Linear, no back-nav, non-dismissible. ---
+function showNamebindModal(signalContext, archivedQuests) {
+  if (namebindModalIsOpen) return;
+  if (localStorage.getItem('kairu_namebind_active') === 'true') return;
+  namebindModalIsOpen = true;
+
+  const evidenceCards = generateEvidenceCards(signalContext, archivedQuests);
+
+  // Ceremony-local working state (committed only at the seal).
+  const draft = {
+    acknowledged: evidenceCards.map(() => false),
+    evidenceDisputed: false,
+    evidenceCorrection: '',
+    sovereignName: '',
+    commandTitle: '',
+    coachPermission: null
+  };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'namebind-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  // Non-dismissible: clicking the backdrop does nothing.
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.stopPropagation(); });
+
+  const modal = document.createElement('div');
+  modal.className = 'namebind-modal';
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  // Suppress Escape while the ceremony is mounted (capture phase, before the
+  // app's global keydown handler can see it).
+  const escGuard = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); }
+  };
+  document.addEventListener('keydown', escGuard, true);
+
+  function teardown() {
+    document.removeEventListener('keydown', escGuard, true);
+    overlay.remove();
+    namebindModalIsOpen = false;
+  }
+  // Expose teardown for completeNamebind -> closeNamebindModal.
+  overlay._namebindTeardown = teardown;
+
+  // ---- State renderers ----
+  function renderInterrupt() {
+    modal.innerHTML = `
+      <div class="namebind-headline">I have enough signal now.</div>
+      <div class="namebind-kairu-text">Until this point, I have been recording your motion.
+That phase is over.
+
+A tracker remembers what you did.
+A sovereign intelligence remembers who you said you were becoming.
+
+Before I can speak with authority, you must name the covenant between us.</div>
+      <button class="btn cyan namebind-cta" type="button">I'm listening.</button>`;
+    modal.querySelector('.namebind-cta').addEventListener('click', renderEvidence);
+  }
+
+  function renderEvidence() {
+    const cardsHTML = evidenceCards.map((c, i) => `
+      <div class="namebind-evidence-card" data-index="${i}">
+        <p>${escapeHTML(c.observation)}</p>
+        <div class="namebind-evidence-buttons">
+          <button class="btn cyan" type="button" data-evi="accurate" data-index="${i}">Accurate. Continue.</button>
+          <button class="btn ghost" type="button" data-evi="correct" data-index="${i}">Correct this.</button>
+        </div>
+      </div>`).join('');
+    modal.innerHTML = `
+      <div class="namebind-headline">Here is what I have observed.</div>
+      ${cardsHTML}
+      <button class="btn cyan namebind-cta" type="button" disabled>Proceed.</button>`;
+
+    const cta = modal.querySelector('.namebind-cta');
+    const refreshProceed = () => { cta.disabled = !draft.acknowledged.every(Boolean); };
+
+    modal.querySelectorAll('[data-evi="accurate"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const i = Number(btn.dataset.index);
+        draft.acknowledged[i] = true;
+        const card = modal.querySelector(`.namebind-evidence-card[data-index="${i}"]`);
+        card.classList.add('namebind-evidence-card--ack');
+        card.querySelector('.namebind-evidence-buttons').innerHTML =
+          '<span class="namebind-evidence-ackmark">Recorded.</span>';
+        refreshProceed();
+      });
+    });
+
+    modal.querySelectorAll('[data-evi="correct"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const i = Number(btn.dataset.index);
+        draft.evidenceDisputed = true;
+        localStorage.setItem('kairu_namebind_evidence_disputed', 'true');
+        const card = modal.querySelector(`.namebind-evidence-card[data-index="${i}"]`);
+        card.querySelector('.namebind-evidence-buttons').innerHTML = `
+          <div class="namebind-correction">
+            <label>What did I miss?</label>
+            <input type="text" class="namebind-input" data-correction-index="${i}" placeholder="Tell me what I missed." />
+            <button class="btn cyan" type="button" data-correction-save="${i}">Record it.</button>
+          </div>`;
+        const saveBtn = card.querySelector(`[data-correction-save="${i}"]`);
+        saveBtn.addEventListener('click', () => {
+          const input = card.querySelector(`[data-correction-index="${i}"]`);
+          draft.evidenceCorrection = input.value.trim();
+          localStorage.setItem('kairu_namebind_evidence_correction', draft.evidenceCorrection);
+          draft.acknowledged[i] = true;
+          card.classList.add('namebind-evidence-card--ack');
+          card.querySelector('.namebind-evidence-buttons').innerHTML =
+            '<span class="namebind-evidence-ackmark">Recorded. I do not argue. I record.</span>';
+          refreshProceed();
+        });
+      });
+    });
+
+    cta.addEventListener('click', () => { if (!cta.disabled) renderNaming(); });
+  }
+
+  function renderNaming() {
+    modal.innerHTML = `
+      <div class="namebind-headline">Choose the name I will use when I am not flattering you.</div>
+      <div class="namebind-kairu-text">Choose the name I will call when you drift, delay, rationalize, or rise. This is not a username. This is your operating name.</div>
+      <div class="namebind-field">
+        <label>Sovereign Name</label>
+        <input type="text" class="namebind-input" id="namebindSovereignName" placeholder="e.g. Maku Nadouku" />
+      </div>
+      <div class="namebind-field">
+        <label>Command Title</label>
+        <input type="text" class="namebind-input" id="namebindCommandTitle" placeholder="e.g. The Sovereign (optional)" />
+      </div>
+      <button class="btn cyan namebind-cta" type="button" disabled>This is my name.</button>`;
+
+    const nameInput = modal.querySelector('#namebindSovereignName');
+    const titleInput = modal.querySelector('#namebindCommandTitle');
+    const cta = modal.querySelector('.namebind-cta');
+    nameInput.value = draft.sovereignName;
+    titleInput.value = draft.commandTitle;
+
+    const refresh = () => { cta.disabled = nameInput.value.trim().length < 2; };
+    nameInput.addEventListener('input', refresh);
+    refresh();
+
+    cta.addEventListener('click', () => {
+      if (cta.disabled) return;
+      draft.sovereignName = nameInput.value.trim();
+      draft.commandTitle = titleInput.value.trim();
+      renderConsent();
+    });
+    nameInput.focus();
+  }
+
+  function renderConsent() {
+    modal.innerHTML = `
+      <div class="namebind-headline">One question before the seal.</div>
+      <div class="namebind-kairu-text">Do you authorize me to challenge you when your actions contradict your stated path?</div>
+      <div class="namebind-consent-option" data-permission="passive">
+        <h4>Not yet.</h4>
+        <p>KAIRU observes and reports. No direct challenges.</p>
+      </div>
+      <div class="namebind-consent-option" data-permission="challenge_enabled">
+        <h4>Yes. Hold me to the path.</h4>
+        <p>KAIRU will name drift, contradiction, and rationalization directly.</p>
+      </div>
+      <button class="btn cyan namebind-cta" type="button" disabled>Confirm.</button>`;
+
+    const cta = modal.querySelector('.namebind-cta');
+    modal.querySelectorAll('.namebind-consent-option').forEach((opt) => {
+      opt.addEventListener('click', () => {
+        modal.querySelectorAll('.namebind-consent-option').forEach((o) => o.classList.remove('selected'));
+        opt.classList.add('selected');
+        draft.coachPermission = opt.dataset.permission;
+        cta.disabled = false;
+      });
+    });
+
+    cta.addEventListener('click', () => { if (!cta.disabled) renderSeal(); });
+  }
+
+  function renderSeal() {
+    const ceremonyText = generateCeremonyText(draft.sovereignName, draft.commandTitle, draft.coachPermission);
+    modal.innerHTML = `
+      <div class="namebind-headline">The Seal.</div>
+      <div class="namebind-kairu-text">${escapeHTML(ceremonyText)}</div>
+      <button class="namebind-hold-button" type="button">
+        <span class="namebind-hold-fill"></span>
+        <span class="namebind-hold-label">Bind Name</span>
+      </button>
+      <div class="namebind-hold-hint">Press and hold for 3 seconds.</div>`;
+
+    const holdBtn = modal.querySelector('.namebind-hold-button');
+    const fill = modal.querySelector('.namebind-hold-fill');
+    const HOLD_MS = 3000;
+    let startTs = null;
+    let rafId = null;
+    let done = false;
+
+    function tick(now) {
+      if (startTs === null) return;
+      const elapsed = now - startTs;
+      const pct = Math.min(100, (elapsed / HOLD_MS) * 100);
+      fill.style.height = pct + '%';
+      if (pct >= 100) {
+        done = true;
+        holdBtn.classList.add('complete');
+        cancelHold();
+        // Threshold crossed — commit the ceremony.
+        completeNamebind(draft.sovereignName, draft.commandTitle, draft.coachPermission, signalContext);
+        return;
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function beginHold(e) {
+      if (done) return;
+      e.preventDefault();
+      // Use a monotonic clock via requestAnimationFrame timestamps.
+      startTs = null;
+      rafId = requestAnimationFrame((t) => { startTs = t; rafId = requestAnimationFrame(tick); });
+    }
+
+    function cancelHold() {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      startTs = null;
+    }
+
+    function releaseHold() {
+      if (done) return;
+      cancelHold();
+      fill.style.height = '0%'; // releasing early resets to 0
+    }
+
+    holdBtn.addEventListener('mousedown', beginHold);
+    holdBtn.addEventListener('touchstart', beginHold, { passive: false });
+    holdBtn.addEventListener('mouseup', releaseHold);
+    holdBtn.addEventListener('mouseleave', releaseHold);
+    holdBtn.addEventListener('touchend', releaseHold);
+    holdBtn.addEventListener('touchcancel', releaseHold);
+  }
+
+  renderInterrupt();
+}
+
+function closeNamebindModal() {
+  const overlay = document.querySelector('.namebind-overlay');
+  if (overlay && typeof overlay._namebindTeardown === 'function') {
+    overlay._namebindTeardown();
+  } else if (overlay) {
+    overlay.remove();
+    namebindModalIsOpen = false;
+  } else {
+    namebindModalIsOpen = false;
+  }
+}
+
+// --- Completion: writes all nine keys, flips voice mode, fires the First Named
+// Quest. ZERO XP is awarded here or in anything it calls. Hard rule.
+function completeNamebind(sovereignName, commandTitle, coachPermission, signalContext) {
+  const ceremonyDate = new Date().toISOString();
+  const identityAnchor = {
+    sovereignName,
+    commandTitle: commandTitle || '',
+    date: ceremonyDate,
+    coachPermission
+  };
+  const ceremonyText = generateCeremonyText(sovereignName, commandTitle, coachPermission);
+
+  localStorage.setItem('kairu_namebind_active', 'true');
+  localStorage.setItem('kairu_namebind_date', ceremonyDate);
+  localStorage.setItem('kairu_namebind_sovereign_name', sovereignName);
+  localStorage.setItem('kairu_namebind_command_title', commandTitle || '');
+  localStorage.setItem('kairu_namebind_voice_mode', 'sovereign_witness');
+  localStorage.setItem('kairu_namebind_coach_permission', coachPermission);
+  localStorage.setItem('kairu_namebind_ceremony_text', ceremonyText);
+  localStorage.setItem('kairu_namebind_identity_anchor', JSON.stringify(identityAnchor));
+  // kairu_namebind_first_signal_context was written at trigger; keep it intact.
+
+  closeNamebindModal();
+
+  // Fire the First Named Quest immediately — converts ceremony into evidence.
+  generateFirstNamedQuest(sovereignName);
+
+  refreshKairuVoiceLayer();
+}
+
+// --- First Named Quest. Built on the real v2.5 quest schema so the board can
+// render it, while carrying the spec's Phase 3 provenance fields. rawInputs is
+// the pre-patch null sentinel. Awards no XP on creation.
+function generateFirstNamedQuest(sovereignName) {
+  const now = Date.now();
+  const createdAt = new Date(now).toISOString();
+  const deadline = new Date(now + 86400000).toISOString(); // 24 hours
+  const today = localToday();
+
+  const firstQuest = {
+    id: `namebind_first_quest_${now}`,
+    title: 'Prove the Namebind was not theater.',
+    description: `${sovereignName}, ship one visible improvement to KAIRU today. Not a plan. Not a note. A shipped change.`,
+    // Real v2.5 quest schema (so questTemplate / completion engine work):
+    rarity: 'Uncommon',          // 250 XP anchor (Doc 10)
+    base_xp: 250,
+    rawXPBeforeCaps: 250,
+    date_created: today,
+    due_date: deadline.slice(0, 10),
+    date_completed: null,
+    status: 'In Progress',
+    xpType: 'command',           // canonical value; renders as CXP on the board
+    xp_earned: 0,
+    cxp_earned: 0,
+    sxp_earned: 0,
+    primarySkill: null,
+    supportSkills: [],
+    skillXpEarned: {},
+    is_locked: false,
+    completion_note: null,
+    serendipity_flagged: false,
+    rawInputs: null,             // pre-patch era sentinel (rawInputs rule)
+    // Spec / Phase 3 provenance fields:
+    xpReward: 250,
+    source: 'KAIRU_NAMEBIND',
+    initiatedBy: 'KAIRU',        // Phase 3 field — populated now to avoid a retrofit
+    createdAt,
+    deadline
+  };
+
+  addQuestToActive(firstQuest);
+}
+
+// Push a quest onto the active board through the canonical state pipeline.
+function addQuestToActive(quest) {
+  if (!Array.isArray(state.activeQuests)) state.activeQuests = [];
+  state.activeQuests.push(quest);
+  saveState();
+  if (typeof renderAll === 'function') renderAll();
+}
+
+// Refresh any UI surface that reflects KAIRU's voice mode. The actual voice-tone
+// changes are Phase 3 (out of scope); this re-renders so the new quest and any
+// namebind-aware surface appear immediately.
+function refreshKairuVoiceLayer() {
+  if (typeof renderAll === 'function') renderAll();
+}
+
+// --- Coach Brief injection: surfaces the Namebind covenant to the AI layer.
+function getNamebindCoachBriefBlock() {
+  const active = localStorage.getItem('kairu_namebind_active') === 'true';
+  if (!active) return '';
+  const sovereignName = localStorage.getItem('kairu_namebind_sovereign_name') || '';
+  const commandTitle = localStorage.getItem('kairu_namebind_command_title') || '';
+  const coachPermission = localStorage.getItem('kairu_namebind_coach_permission') || 'passive';
+  const ceremonyDate = localStorage.getItem('kairu_namebind_date') || '';
+  const titleLine = commandTitle ? `${sovereignName}, ${commandTitle}` : sovereignName;
+  const permissionLine = coachPermission === 'challenge_enabled'
+    ? 'KAIRU is authorized to challenge contradiction, name drift, and reject rationalization directly.'
+    : 'KAIRU is in observer mode. The Player has not yet authorized direct challenge.';
+  return `
+---
+NAMEBIND ACTIVE (${ceremonyDate})
+The Player has completed the Namebind ceremony.
+Address the Player as: ${titleLine}
+${permissionLine}
+Separate maintenance tasks from progression tasks in all responses.
+Judge progress by shipped evidence, not stated intention.
+Do not reward busywork.
+---`;
 }
 
 // --- Evening Witness + auto Echo ---
