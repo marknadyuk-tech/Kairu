@@ -2755,3 +2755,52 @@ body.sanctuary-active .app {
   font-size: 0.8rem;
   color: #64748b;
 }
+/* Keyboard focus ring for the (role=button) consent options. */
+.namebind-consent-option:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* ---- Storage quota / write-failure banner ----------------------------------
+   Persistent, high-visibility alert shown when localStorage cannot be written
+   (e.g. quota exceeded on long-history accounts). Stays until resolved. */
+.kairu-storage-warning {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  color: #fff;
+  background: var(--red);
+  box-shadow: var(--red-glow);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+.kairu-storage-warning[hidden] { display: none; }
+
+/* ---- Chronicle "Load more" pagination control ------------------------------ */
+.archive-load-more {
+  display: block;
+  width: 100%;
+  margin: 0.75rem 0 0.25rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: var(--cyan);
+  background: var(--cyan-soft);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.archive-load-more:hover {
+  background: rgba(0, 229, 255, 0.14);
+  border-color: rgba(0, 229, 255, 0.55);
+}
+.archive-load-more:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}

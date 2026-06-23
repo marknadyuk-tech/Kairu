@@ -6,6 +6,106 @@ const XP_TIERS = {
   Legendary: 2500
 };
 
+const KAIRU_TIME = (() => {
+  const testParamNames = ["kairu_test", "kairu_test_scenario", "kairu_test_now"];
+  let fixedNowMs = null;
+
+  function getSearchParams() {
+    try {
+      if (typeof window === "undefined" || !window.location) return null;
+      return new URLSearchParams(window.location.search || "");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function hasTestParam() {
+    const params = getSearchParams();
+    return !!params && testParamNames.some((name) => params.has(name));
+  }
+
+  function isTestMode() {
+    return !!(typeof window !== "undefined" && (window.__KAIRU_TEST_MODE__ || hasTestParam()));
+  }
+
+  function parseNow(value) {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = new Date(value);
+      const ms = parsed.getTime();
+      return Number.isFinite(ms) ? ms : null;
+    }
+    return null;
+  }
+
+  function setFixedNow(value) {
+    if (!isTestMode()) return false;
+    const parsed = parseNow(value);
+    if (!Number.isFinite(parsed)) return false;
+    fixedNowMs = parsed;
+    return true;
+  }
+
+  function primeFromTestInputs() {
+    if (!isTestMode()) return;
+    const params = getSearchParams();
+    const urlNow = params && params.get("kairu_test_now");
+    const globalNow = typeof window !== "undefined" ? window.__KAIRU_TEST_NOW__ : null;
+    setFixedNow(urlNow || globalNow);
+  }
+
+  function nowMs() {
+    return Number.isFinite(fixedNowMs) ? fixedNowMs : Date.now();
+  }
+
+  function now() {
+    return new Date(nowMs());
+  }
+
+  function iso() {
+    return now().toISOString();
+  }
+
+  function formatLocalDate(date = now()) {
+    return date.getFullYear() + '-'
+      + String(date.getMonth() + 1).padStart(2, "0") + '-'
+      + String(date.getDate()).padStart(2, "0");
+  }
+
+  function fromLocalDate(dateString) {
+    return new Date(`${dateString}T00:00:00`);
+  }
+
+  function addDays(dateOrString, days) {
+    const date = typeof dateOrString === "string"
+      ? fromLocalDate(dateOrString)
+      : new Date(dateOrString.getTime());
+    date.setDate(date.getDate() + days);
+    return date;
+  }
+
+  function localDateOffset(days, base = now()) {
+    return formatLocalDate(addDays(base, days));
+  }
+
+  primeFromTestInputs();
+
+  return {
+    isTestMode,
+    setFixedNow,
+    resetFixedNow() { fixedNowMs = null; },
+    now,
+    nowMs,
+    iso,
+    formatLocalDate,
+    fromLocalDate,
+    addDays,
+    localDateOffset,
+    get fixedNow() { return Number.isFinite(fixedNowMs) ? new Date(fixedNowMs).toISOString() : null; }
+  };
+})();
+
 const XP_ENGINE = {
   presenceMultipliers: {
     mechanical: 0.75,
@@ -258,7 +358,7 @@ function deriveCurrentStreak(userState) {
   discs.forEach(d => {
     const dates = new Set(log.filter(e => e.disciplineId === d.id).map(e => e.date));
     let streak = 0;
-    const cursor = new Date();
+    const cursor = KAIRU_TIME.now();
     while (true) {
       const ds = cursor.getFullYear() + '-'
         + String(cursor.getMonth() + 1).padStart(2, '0') + '-'
@@ -298,7 +398,7 @@ function evaluateRankProgress(userState) {
   const rankHistory = userState.rankHistory || [];
   const activeGrade = rankHistory.find(r => r.rank === currentRankName && r.exitedAt === null);
   const daysInGrade = activeGrade
-    ? Math.floor((Date.now() - new Date(activeGrade.enteredAt).getTime()) / 86400000)
+    ? Math.floor((KAIRU_TIME.nowMs() - new Date(activeGrade.enteredAt).getTime()) / 86400000)
     : 0;
 
   const totalXP = userState.totalXP || 0;
@@ -362,7 +462,7 @@ function advanceRank(userState) {
   const currentRankName = userState.identity.tier;
   const currentTierIndex = tiers.indexOf(currentRankName);
   const newRank = tiers[currentTierIndex + 1];
-  const now = new Date().toISOString();
+  const now = KAIRU_TIME.iso();
 
   const rankHistory = [...(userState.rankHistory || [])];
   const activeGradeIndex = rankHistory.findIndex(r => r.rank === currentRankName && r.exitedAt === null);
@@ -640,7 +740,7 @@ function assembleContext() {
   // serializes with everything else and maps cleanly to a future Supabase row.
   const ser = s.serendipity || {};
   const serBuffExpiry = Number(ser.buffExpiry) || 0;
-  const serActive = Date.now() < serBuffExpiry;
+  const serActive = KAIRU_TIME.nowMs() < serBuffExpiry;
   const serendipity = {
     active: serActive,
     multiplier: serActive ? (Number(ser.multiplier) || 1.5) : 1.0,
@@ -648,7 +748,7 @@ function assembleContext() {
     source: ser.source || null
   };
 
-  return { generatedAt: new Date().toISOString(), identity, progression,
+  return { generatedAt: KAIRU_TIME.iso(), identity, progression,
            skills, incomeFlow, balanceSheet, pipeline, discipline, spiritualPractices,
            serendipity };
 }
@@ -656,15 +756,11 @@ function assembleContext() {
 window.kairuContext = assembleContext;
 
 function localToday() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return KAIRU_TIME.formatLocalDate();
 }
 
 function createId(prefix) {
-  return crypto.randomUUID ? crypto.randomUUID() : `${prefix}-${Date.now()}-${Math.random()}`;
+  return crypto.randomUUID ? crypto.randomUUID() : `${prefix}-${KAIRU_TIME.nowMs()}-${Math.random()}`;
 }
 
 function minutesFromTime(value) {
@@ -717,7 +813,7 @@ function disciplineAppliesToday(disc) {
   const anchorStr = disc && disc.anchorDate;
   if (!anchorStr) return true; // never hide a protocol we can't schedule
 
-  const now = new Date(`${localToday()}T00:00:00`);
+  const now = KAIRU_TIME.fromLocalDate(localToday());
   const anchor = new Date(`${anchorStr}T00:00:00`);
   if (Number.isNaN(anchor.valueOf())) return true;
 
@@ -948,7 +1044,7 @@ function syncActiveRankHistory(userState) {
   }
 
   const rank = userState.identity.tier;
-  const now = new Date().toISOString();
+  const now = KAIRU_TIME.iso();
   const enteredAt = userState.identity.lastUpdated || userState.identity.startDate || now;
   const rankHistory = Array.isArray(userState.rankHistory) ? userState.rankHistory : [];
   const hasMatchingOpenRank = rankHistory.some(entry => entry && entry.rank === rank && entry.exitedAt === null);
@@ -1108,17 +1204,77 @@ function normalizeState(raw) {
   return merged;
 }
 
+// Set when a scenario write fails (quota) at boot, so loadState() can keep the
+// scenario in memory instead of silently falling back to a fresh account.
+let pendingScenarioFallbackState = null;
+
 function loadState() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (raw) state = normalizeState(raw);
+    if (raw) {
+      state = normalizeState(raw);
+      return;
+    }
   } catch (error) {
+    // fall through to fallback handling below
+  }
+  if (pendingScenarioFallbackState) {
+    state = normalizeState(pendingScenarioFallbackState);
+  } else {
     state = structuredClone(defaultState);
   }
 }
 
+// Storage write guard. localStorage.setItem throws when the origin quota is
+// exceeded (the 20-year-history failure mode). We must NEVER let that silently
+// collapse the app back to default/fresh state — the in-memory state is the
+// real record at that moment. Catch, report, and keep memory intact.
+function safeSetLocalStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return { ok: true };
+  } catch (error) {
+    const quota = !!(error && (
+      error.name === "QuotaExceededError" ||
+      error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+      error.code === 22 ||
+      error.code === 1014
+    ));
+    return { ok: false, quota, error };
+  }
+}
+
+// Surface a storage-write failure to the Player without destroying state.
+// Shows a persistent banner (not the transient toast alone) because an
+// unsaved-changes condition needs to stay visible until acknowledged/resolved.
+function handleStorageWriteFailure(result) {
+  const quota = !!(result && result.quota);
+  const message = quota
+    ? "Storage is full. Recent changes are held in memory but could NOT be saved. Export a backup now to avoid losing progress."
+    : "KAIRU could not write to local storage. Recent changes are unsaved.";
+  try { console.warn("KAIRU storage write failed", result && result.error); } catch (e) {}
+  showStorageWarningBanner(message);
+  try { showToast(quota ? "Storage full — changes unsaved" : "Storage write failed"); } catch (e) {}
+}
+
+function showStorageWarningBanner(message) {
+  if (typeof document === "undefined" || !document.body) return;
+  let banner = document.getElementById("kairuStorageWarning");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "kairuStorageWarning";
+    banner.className = "kairu-storage-warning";
+    banner.setAttribute("role", "alert");
+    document.body.appendChild(banner);
+  }
+  banner.textContent = message;
+  banner.hidden = false;
+}
+
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const result = safeSetLocalStorage(STORAGE_KEY, JSON.stringify(state));
+  if (!result.ok) handleStorageWriteFailure(result);
+  return result;
 }
 
 function compound() {
@@ -1526,7 +1682,7 @@ function saveQuest() {
   const description = els.questDescription.value.trim() || null;
 
   state.activeQuests.push({
-    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+    id: crypto.randomUUID ? crypto.randomUUID() : `${KAIRU_TIME.nowMs()}-${Math.random()}`,
     title,
     rarity: difficulty,
     base_xp: baseXP,
@@ -1640,8 +1796,8 @@ function recordDailyXP(rawXP, postedXP, dateString) {
 function recordXPEvent(source, rawXP, postedXP, band, metadata = {}) {
   if (!Array.isArray(state.xpLog)) state.xpLog = [];
   state.xpLog.unshift({
-    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-    timestamp: new Date().toISOString(),
+    id: crypto.randomUUID ? crypto.randomUUID() : `${KAIRU_TIME.nowMs()}-${Math.random()}`,
+    timestamp: KAIRU_TIME.iso(),
     source,
     rawXP,
     postedXP,
@@ -1748,12 +1904,12 @@ function completeQuest(questId) {
 function logContribution(questId, contactName, contributionType, note) {
   const contributors = JSON.parse(localStorage.getItem('questContributors') || '[]');
   contributors.push({
-    contribution_id: 'con_' + Date.now(),
+    contribution_id: 'con_' + KAIRU_TIME.nowMs(),
     contact_name: contactName.trim(),
     quest_id: questId,
     contribution_type: contributionType,
     data_source: 'USER_CLAIMED',
-    logged_at: new Date().toISOString(),
+    logged_at: KAIRU_TIME.iso(),
     note: note || null
   });
   localStorage.setItem('questContributors', JSON.stringify(contributors));
@@ -1812,7 +1968,10 @@ function promptContributor(questId) {
 
   document.body.appendChild(modal);
 
-  const close = () => modal.remove();
+  const close = () => {
+    modal.remove();
+    flushDeferredNamebindCheck();
+  };
 
   modal.querySelector('[data-action="skip-contributor"]').addEventListener('click', close);
   modal.querySelector('[data-action="log-contributor"]').addEventListener('click', () => {
@@ -1830,7 +1989,7 @@ function flagSerendipity(questId) {
   const quest = state.activeQuests.find((q) => q.id === questId);
   if (!quest || quest.serendipity_flagged || quest.is_locked) return;
 
-  const buffExpiry = Date.now() + (24 * 60 * 60 * 1000);
+  const buffExpiry = KAIRU_TIME.nowMs() + (24 * 60 * 60 * 1000);
   state.serendipity = {
     buffExpiry,
     multiplier: 1.5,
@@ -1861,7 +2020,7 @@ function getActiveMultiplier() {
   const buffExpiry = Number(ser.buffExpiry) || 0;
   let multiplier = 1.0;
 
-  if (Date.now() < buffExpiry) {
+  if (KAIRU_TIME.nowMs() < buffExpiry) {
     multiplier *= (Number(ser.multiplier) || 1.5);
   }
 
@@ -1921,7 +2080,7 @@ function normalizeEcho(echo = {}) {
 
   return {
     id: echo.id || createId("echo"),
-    createdAt: echo.createdAt || new Date().toISOString(),
+    createdAt: echo.createdAt || KAIRU_TIME.iso(),
     sourceType: ECHO_SOURCE_TYPES.includes(echo.sourceType) ? echo.sourceType : "manual",
     sourceId: echo.sourceId != null ? String(echo.sourceId) : null,
     title: String(echo.title || "Untitled Echo"),
@@ -2011,7 +2170,7 @@ function maybeBacklogEcho() {
 function echoTimeAgo(iso) {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return "";
-  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  const secs = Math.max(0, Math.floor((KAIRU_TIME.nowMs() - then) / 1000));
   if (secs < 60) return "just now";
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ago`;
@@ -2193,7 +2352,7 @@ function completeTask(taskId) {
   if (!task || task.completed) return;
   // NOTE: deliberately no XP call here. Tasks never bank XP.
   task.completed = true;
-  task.completedAt = new Date().toISOString();
+  task.completedAt = KAIRU_TIME.iso();
   saveState();
   renderTasks();
   renderReadiness();
@@ -2531,7 +2690,7 @@ function buildCoachBrief() {
   L.push("");
   L.push("====================================");
   L.push("KAIRU OPERATOR STATE BRIEF");
-  L.push(`Generated: ${new Date().toISOString()}`);
+  L.push(`Generated: ${KAIRU_TIME.iso()}`);
   L.push("====================================");
   L.push("");
 
@@ -2735,7 +2894,16 @@ function copyCoachExport() {
   }
 }
 
+// Chronicle render budget. A long-history account can hold thousands of
+// archived quests; rendering every one into the DOM at once freezes the view
+// (the 5-year scenario produced ~1,369 cards). Render a bounded window and let
+// the Player reveal more on demand. This never mutates archive data — counts
+// elsewhere (intelArchived) still read the full array.
+const ARCHIVE_RENDER_PAGE = 100;
+let archiveRenderLimit = ARCHIVE_RENDER_PAGE;
+
 function openArchive() {
+  archiveRenderLimit = ARCHIVE_RENDER_PAGE; // fresh window each time the Chronicle opens
   renderFullArchive();
   setView("archive");
 }
@@ -2745,9 +2913,31 @@ function closeArchive() {
 }
 
 function renderFullArchive() {
-  els.fullArchiveList.innerHTML = state.archivedQuests.length
-    ? state.archivedQuests.map((quest) => archiveTemplate(quest)).join("")
-    : '<div class="empty">Chronicle empty. Completed quests will land here.</div>';
+  const total = state.archivedQuests.length;
+  if (!total) {
+    els.fullArchiveList.innerHTML = '<div class="empty">Chronicle empty. Completed quests will land here.</div>';
+    return;
+  }
+
+  const shown = Math.min(archiveRenderLimit, total);
+  let html = state.archivedQuests.slice(0, shown).map((quest) => archiveTemplate(quest)).join("");
+
+  if (shown < total) {
+    const remaining = total - shown;
+    html += `<button type="button" class="archive-load-more" id="archiveLoadMore">`
+      + `Load more — showing ${shown.toLocaleString()} of ${total.toLocaleString()} `
+      + `(${remaining.toLocaleString()} more)</button>`;
+  }
+
+  els.fullArchiveList.innerHTML = html;
+
+  const loadMore = els.fullArchiveList.querySelector("#archiveLoadMore");
+  if (loadMore) {
+    loadMore.addEventListener("click", () => {
+      archiveRenderLimit += ARCHIVE_RENDER_PAGE;
+      renderFullArchive();
+    });
+  }
 }
 
 function openFinance() {
@@ -2799,7 +2989,7 @@ function exportBackup() {
     const payload = {
       kairuBackup: true,
       version: STORAGE_KEY,            // "kairu_alpha_v1"
-      exportedAt: new Date().toISOString(),
+      exportedAt: KAIRU_TIME.iso(),
       state: state
     };
     const json = JSON.stringify(payload, null, 2);
@@ -2860,6 +3050,7 @@ function showModal(modal) {
 
 function hideModal(modal) {
   modal.classList.remove("show");
+  flushDeferredNamebindCheck();
 }
 
 function showToast(message) {
@@ -2940,7 +3131,7 @@ function renderDailyXPStatus() {
 
 function renderSerendipity() {
   const buffExpiry = Number(state.serendipity && state.serendipity.buffExpiry) || 0;
-  const now = Date.now();
+  const now = KAIRU_TIME.nowMs();
 
   if (now < buffExpiry) {
     const diff = buffExpiry - now;
@@ -3149,7 +3340,7 @@ function savePipeline() {
 
   if (!Array.isArray(state.jobPipeline)) state.jobPipeline = [];
   state.jobPipeline.push({
-    id: 'pipe-' + Date.now(),
+    id: 'pipe-' + KAIRU_TIME.nowMs(),
     company,
     role,
     stage,
@@ -3223,7 +3414,7 @@ function getDisciplineStreak(disciplineId) {
 
   // Walk backwards from today counting consecutive days
   let streak = 0;
-  const cursor = new Date();
+  const cursor = KAIRU_TIME.now();
   while (true) {
     const dateStr = cursor.getFullYear() + '-'
       + String(cursor.getMonth() + 1).padStart(2, '0') + '-'
@@ -3249,7 +3440,7 @@ function getDisciplineStreakAsOfYesterday(disciplineId) {
       .map(e => e.date)
   );
   let streak = 0;
-  const cursor = new Date();
+  const cursor = KAIRU_TIME.now();
   cursor.setDate(cursor.getDate() - 1);
   while (true) {
     const dateStr = cursor.getFullYear() + '-'
@@ -3279,7 +3470,7 @@ function getCalendarCells(disciplineId, days) {
   const cells = [];
   const today = localToday();
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
+    const d = KAIRU_TIME.now();
     d.setDate(d.getDate() - i);
     const dateStr = d.getFullYear() + '-'
       + String(d.getMonth() + 1).padStart(2, '0') + '-'
@@ -3595,7 +3786,7 @@ function renderDisciplineWeek() {
   const today = localToday();
 
   // Monday-based current week
-  const now = new Date();
+  const now = KAIRU_TIME.now();
   const dow = (now.getDay() + 6) % 7; // 0 = Monday
   const monday = new Date(now);
   monday.setDate(now.getDate() - dow);
@@ -3893,6 +4084,7 @@ function dismissSanctuary() {
   const sanctuary = document.getElementById("sanctuary");
   if (sanctuary) sanctuary.hidden = true;
   document.body.classList.remove("sanctuary-active");
+  flushDeferredNamebindCheck();
 }
 
 // Phase 2.6.5: the 5-signal list defaults to collapsed so the single Moment
@@ -4162,7 +4354,7 @@ function nsQuestCompletedToday(q, today) {
 }
 function nsQuestXP(q) { return Number(q.cxp_earned ?? q.xp_earned ?? q.raw_cxp ?? 0) || 0; }
 function getDayOfYear() {
-  const now = new Date();
+  const now = KAIRU_TIME.now();
   const start = new Date(now.getFullYear(), 0, 0);
   const oneDay = 1000 * 60 * 60 * 24;
   return Math.floor((now - start) / oneDay);
@@ -4553,7 +4745,7 @@ function collectMomentumScore() {
 
   // Quests completed in the trailing 7-day window: +15 each, capped at 30.
   const weekAgo = (() => {
-    const d = new Date();
+    const d = KAIRU_TIME.now();
     d.setDate(d.getDate() - 6); // inclusive 7-day window (today + prior 6)
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -4715,6 +4907,29 @@ function forceRescan() {
 
 // checkNamebindTrigger() — wired at the end of scanSystem(); fires once per
 // genuine nervous-system update cycle (init + forceRescan).
+// Minimum tracked days before the Namebind ceremony may interrupt the Player.
+const NAMEBIND_MIN_TRACKED_DAYS = 7;
+// Minimum count of well-formed completed quests required as evidence.
+const NAMEBIND_MIN_VALID_QUESTS = 3;
+
+// Evidence-quality gate for the Namebind ceremony. A quest counts only if it
+// has a real title, a parseable completion date, and rawInputs that are either
+// an object (V2) or explicitly null (legacy V1) — never undefined/garbage from
+// a corrupted-recovery blob. This keeps the non-dismissible ceremony off of
+// sparse or broken history.
+function hasNamebindReadyHistory(archivedQuests) {
+  if (!Array.isArray(archivedQuests)) return false;
+  const validCompleted = archivedQuests.filter((q) =>
+    q &&
+    typeof q.title === "string" &&
+    q.title.trim() &&
+    q.date_completed &&
+    !Number.isNaN(new Date(q.date_completed).getTime()) &&
+    (q.rawInputs === null || typeof q.rawInputs === "object")
+  );
+  return validCompleted.length >= NAMEBIND_MIN_VALID_QUESTS;
+}
+
 function checkNamebindTrigger() {
   const namebindActive = localStorage.getItem('kairu_namebind_active') === 'true';
   if (namebindActive) return;            // already done, never fire again
@@ -4722,16 +4937,26 @@ function checkNamebindTrigger() {
 
   const ns = (state && state.kairuNS) ? state.kairuNS : {};
   const archivedQuests = Array.isArray(state.archivedQuests) ? state.archivedQuests : [];
-  const hasMinimumData = archivedQuests.length >= 1;
+  // Readiness gate: the Namebind is a non-dismissible identity ceremony, so it
+  // must only fire on real, well-formed history — never on a single first quest
+  // and never on sparse/corrupted recovery data. Require enough tracked days
+  // AND enough valid completed quests before the airlock can open.
+  const hasMinimumTenure = (Number(state.daysTracked) || 0) >= NAMEBIND_MIN_TRACKED_DAYS;
+  const hasMinimumData = hasNamebindReadyHistory(archivedQuests);
   const hasMeaningfulSignal = (ns.pressureScore > 15) || (ns.opportunityScore > 15);
 
-  if (hasMinimumData && hasMeaningfulSignal) {
+  if (hasMinimumTenure && hasMinimumData && hasMeaningfulSignal) {
+    if (hasBlockingSurfaceForNamebind()) {
+      deferNamebindCheck();
+      return;
+    }
+
     // Capture signal context at the moment of trigger.
     const signalContext = {
       pressureScore: ns.pressureScore,
       opportunityScore: ns.opportunityScore,
       momentum: ns.momentum,
-      triggeredAt: new Date().toISOString(),
+      triggeredAt: KAIRU_TIME.iso(),
       questCount: archivedQuests.length
     };
     localStorage.setItem('kairu_namebind_first_signal_context', JSON.stringify(signalContext));
@@ -4741,6 +4966,30 @@ function checkNamebindTrigger() {
 
 // Module-level guard: true while the ceremony modal is mounted.
 let namebindModalIsOpen = false;
+let namebindCheckDeferred = false;
+
+function hasBlockingSurfaceForNamebind() {
+  if (typeof document === 'undefined') return false;
+  const sanctuary = document.getElementById('sanctuary');
+  const sanctuaryPending = sanctuary && sessionStorage.getItem("kairu_sanctuary_dismissed") !== "true";
+  const sanctuaryOpen = sanctuary && sanctuary.hidden === false;
+  const appModalOpen = !!document.querySelector('.modal-bg.show');
+  const namebindOverlayOpen = !!document.querySelector('.namebind-overlay');
+  return !!(sanctuaryPending || sanctuaryOpen || appModalOpen || namebindOverlayOpen);
+}
+
+function deferNamebindCheck() {
+  namebindCheckDeferred = true;
+}
+
+function flushDeferredNamebindCheck() {
+  if (!namebindCheckDeferred || typeof window === 'undefined') return;
+  window.setTimeout(() => {
+    if (!namebindCheckDeferred) return;
+    namebindCheckDeferred = false;
+    checkNamebindTrigger();
+  }, 0);
+}
 
 // --- Evidence cards: KAIRU proves she sees the Player before asking for authority.
 // Generated dynamically from live data — never hardcoded.
@@ -4953,23 +5202,34 @@ Before I can speak with authority, you must name the covenant between us.</div>
     modal.innerHTML = `
       <div class="namebind-headline">One question before the seal.</div>
       <div class="namebind-kairu-text">Do you authorize me to challenge you when your actions contradict your stated path?</div>
-      <div class="namebind-consent-option" data-permission="passive">
+      <div class="namebind-consent-option" data-permission="passive" role="button" tabindex="0" aria-pressed="false">
         <h4>Not yet.</h4>
         <p>KAIRU observes and reports. No direct challenges.</p>
       </div>
-      <div class="namebind-consent-option" data-permission="challenge_enabled">
+      <div class="namebind-consent-option" data-permission="challenge_enabled" role="button" tabindex="0" aria-pressed="false">
         <h4>Yes. Hold me to the path.</h4>
         <p>KAIRU will name drift, contradiction, and rationalization directly.</p>
       </div>
       <button class="btn cyan namebind-cta" type="button" disabled>Confirm.</button>`;
 
     const cta = modal.querySelector('.namebind-cta');
+    const selectOption = (opt) => {
+      modal.querySelectorAll('.namebind-consent-option').forEach((o) => {
+        o.classList.remove('selected');
+        o.setAttribute('aria-pressed', 'false');
+      });
+      opt.classList.add('selected');
+      opt.setAttribute('aria-pressed', 'true');
+      draft.coachPermission = opt.dataset.permission;
+      cta.disabled = false;
+    };
     modal.querySelectorAll('.namebind-consent-option').forEach((opt) => {
-      opt.addEventListener('click', () => {
-        modal.querySelectorAll('.namebind-consent-option').forEach((o) => o.classList.remove('selected'));
-        opt.classList.add('selected');
-        draft.coachPermission = opt.dataset.permission;
-        cta.disabled = false;
+      opt.addEventListener('click', () => selectOption(opt));
+      opt.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          selectOption(opt);
+        }
       });
     });
 
@@ -5055,7 +5315,7 @@ function closeNamebindModal() {
 // --- Completion: writes all nine keys, flips voice mode, fires the First Named
 // Quest. ZERO XP is awarded here or in anything it calls. Hard rule.
 function completeNamebind(sovereignName, commandTitle, coachPermission, signalContext) {
-  const ceremonyDate = new Date().toISOString();
+  const ceremonyDate = KAIRU_TIME.iso();
   const identityAnchor = {
     sovereignName,
     commandTitle: commandTitle || '',
@@ -5086,7 +5346,7 @@ function completeNamebind(sovereignName, commandTitle, coachPermission, signalCo
 // render it, while carrying the spec's Phase 3 provenance fields. rawInputs is
 // the pre-patch null sentinel. Awards no XP on creation.
 function generateFirstNamedQuest(sovereignName) {
-  const now = Date.now();
+  const now = KAIRU_TIME.nowMs();
   const createdAt = new Date(now).toISOString();
   const deadline = new Date(now + 86400000).toISOString(); // 24 hours
   const today = localToday();
@@ -5511,7 +5771,7 @@ function applyCareerPreset(careerKey) {
     if (exists) return;
     const defaults = TIER_XP_DEFAULTS[item.tier] || TIER_XP_DEFAULTS.acquiring;
     state.skills.push({
-      id: 'sk-' + Date.now() + '-' + added,
+    id: 'sk-' + KAIRU_TIME.nowMs() + '-' + added,
       name: item.name,
       category: item.category,
       tier: item.tier,
@@ -5643,7 +5903,7 @@ function renderSkills() {
 }
 
 function renderClock() {
-  const now = new Date();
+  const now = KAIRU_TIME.now();
   const day = ["SUN","MON","TUE","WED","THU","FRI","SAT"][now.getDay()];
   const month = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][now.getMonth()];
   const date = String(now.getDate()).padStart(2, "0");
@@ -5683,7 +5943,7 @@ function saveIdentity() {
   state.identity.archetype = normalizeArchetype(document.getElementById("identityArchetypeInput").value);
   state.identity.tier = tierValue;
   state.identity.faith = cleanFaithValue(document.getElementById("identityFaithInput").value);
-  state.identity.lastUpdated = new Date().toISOString();
+  state.identity.lastUpdated = KAIRU_TIME.iso();
   if (previousTier !== state.identity.tier) {
     syncActiveRankHistory(state);
   }
@@ -5804,7 +6064,7 @@ function saveSkill() {
   }
 
   state.skills.push({
-    id: 'sk-' + Date.now(),
+    id: 'sk-' + KAIRU_TIME.nowMs(),
     name,
     category,
     tier,
@@ -5964,6 +6224,340 @@ $$(".tab").forEach((tab) => {
   [catEl, tierEl, xpEl].forEach(el => el.addEventListener('change', () => { skillMetaTouched = true; }));
 })();
 
+const LONG_HORIZON_SCENARIOS = {
+  "fresh-account": { label: "Fresh account", days: 0, rank: "E", credentials: 0, rare: 0, epic: 0, legendary: 0 },
+  "30-days": { label: "30 days", days: 30, rank: "E", credentials: 0, rare: 10, epic: 2, legendary: 0 },
+  "6-months": { label: "6 months", days: 183, rank: "E", credentials: 1, rare: 28, epic: 6, legendary: 0 },
+  "1-year": { label: "1 year", days: 365, rank: "D", credentials: 2, rare: 80, epic: 22, legendary: 1 },
+  "5-years": { label: "5 years", days: 1826, rank: "B", credentials: 5, rare: 220, epic: 70, legendary: 5, namebind: true },
+  "20-years": { label: "20 years", days: 7305, rank: "SS", credentials: 8, rare: 900, epic: 360, legendary: 30, namebind: true },
+  "edge-corrupted-sparse": { label: "Edge-case corrupted/sparse history", days: 45, rank: "E", credentials: 0, rare: 3, epic: 1, legendary: 0, sparse: true }
+};
+
+const LONG_HORIZON_STORAGE_KEYS = [
+  "questContributors",
+  "kairu_namebind_active",
+  "kairu_namebind_date",
+  "kairu_namebind_sovereign_name",
+  "kairu_namebind_command_title",
+  "kairu_namebind_voice_mode",
+  "kairu_namebind_coach_permission",
+  "kairu_namebind_ceremony_text",
+  "kairu_namebind_identity_anchor"
+];
+
+function scenarioDate(baseDateString, offsetDays) {
+  return KAIRU_TIME.localDateOffset(offsetDays, KAIRU_TIME.fromLocalDate(baseDateString));
+}
+
+function scenarioIsoFromDate(dateString, hour = 12) {
+  return `${dateString}T${String(hour).padStart(2, "0")}:00:00.000Z`;
+}
+
+function scenarioRarity(index, targets) {
+  if (index < targets.legendary) return "Legendary";
+  if (index < targets.legendary + targets.epic) return "Epic";
+  if (index < targets.legendary + targets.epic + targets.rare) return "Rare";
+  return index % 5 === 0 ? "Uncommon" : "Common";
+}
+
+function buildScenarioQuest(index, dateString, rarity, scenarioName) {
+  const minutes = 45 + (index % 5) * 15;
+  const qualityOptions = [0.75, 1.00, 1.15];
+  const quality = qualityOptions[index % qualityOptions.length];
+  const k = 2 + (index % 4);
+  const p = 2 + ((index + 1) % 4);
+  const a = 2 + ((index + 2) % 4);
+  const c = 0.35 * (k / 3) + 0.25 * (p / 3) + 0.40 * (a / 3);
+  const baseXP = Math.max(1, Math.round(minutes * quality * c));
+
+  return {
+    id: `lh-${scenarioName}-quest-${index}`,
+    title: `Scenario Quest ${index + 1}`,
+    rarity,
+    base_xp: baseXP,
+    date_created: dateString,
+    due_date: dateString,
+    date_completed: dateString,
+    status: "Completed",
+    xpType: "command",
+    xp_earned: Math.min(baseXP, 300),
+    cxp_earned: baseXP,
+    sxp_earned: 0,
+    primarySkill: "Systems",
+    supportSkills: index % 2 === 0 ? ["Writing"] : [],
+    skillXpEarned: { Systems: Math.round(baseXP * 0.7) },
+    is_locked: true,
+    completion_note: "Seeded long-horizon test event.",
+    description: "Generated by KAIRU long-horizon test mode.",
+    serendipity_flagged: false,
+    minutesFocused: minutes,
+    qualityBand: quality,
+    knowHow: k,
+    problemSolving: p,
+    accountability: a,
+    rawInputs: {
+      minutes,
+      quality,
+      K: k,
+      P: p,
+      A: a,
+      skillWeights: [],
+      spiritualRelevance: null
+    },
+    rawXPBeforeCaps: baseXP,
+    raw_xp: baseXP,
+    raw_cxp: baseXP,
+    xp_band: baseXP > 300 ? "overflow" : "prime"
+  };
+}
+
+function buildLongHorizonScenario(name, options = {}) {
+  const scenarioName = String(name || "fresh-account").toLowerCase();
+  const config = LONG_HORIZON_SCENARIOS[scenarioName] || LONG_HORIZON_SCENARIOS["fresh-account"];
+  const nowDate = options.now ? KAIRU_TIME.formatLocalDate(new Date(options.now)) : localToday();
+  const startDate = scenarioDate(nowDate, -Math.max(0, config.days - 1));
+  const rankEnteredDate = config.days > 0 ? scenarioDate(nowDate, -config.days) : startDate;
+  const stateSeed = structuredClone(defaultState);
+  const historyDays = Math.max(0, config.days);
+  const totalQuestCount = Math.min(
+    Math.max(config.rare + config.epic + config.legendary, Math.floor(historyDays * 0.75)),
+    historyDays ? historyDays : 0
+  );
+
+  stateSeed.identity = {
+    ...stateSeed.identity,
+    name: `Scenario ${config.label}`,
+    archetype: "The Sovereign",
+    tier: config.rank,
+    faith: "Orthodox Christian",
+    cycleDay: historyDays + 1,
+    trackingActive: historyDays > 0,
+    startDate: scenarioIsoFromDate(startDate, 8),
+    lastUpdated: scenarioIsoFromDate(startDate, 8)
+  };
+  stateSeed.daysTracked = historyDays;
+  stateSeed.lastTrackDate = historyDays > 0 ? nowDate : null;
+  stateSeed.verifiedCredentials = config.credentials;
+  stateSeed.rankHistory = [{
+    rank: config.rank,
+    enteredAt: scenarioIsoFromDate(rankEnteredDate, 8),
+    exitedAt: null
+  }];
+  stateSeed.titlesEarned = ["Awakened", ...(RANK_CONFIG.titles[config.rank] || []).slice(0, 1)];
+  stateSeed.activeTitle = stateSeed.titlesEarned[stateSeed.titlesEarned.length - 1] || "Awakened";
+  stateSeed.jobPipeline = [];
+  stateSeed.activeQuests = historyDays > 0 ? [
+    {
+      id: `lh-${scenarioName}-active-1`,
+      title: "Current Horizon Quest",
+      rarity: "Rare",
+      base_xp: 180,
+      date_created: nowDate,
+      due_date: nowDate,
+      date_completed: null,
+      status: "In Progress",
+      xpType: "command",
+      xp_earned: 0,
+      cxp_earned: 0,
+      sxp_earned: 0,
+      primarySkill: "Systems",
+      supportSkills: [],
+      skillXpEarned: {},
+      is_locked: false,
+      completion_note: null,
+      description: "Seeded active quest for visible UI checks.",
+      serendipity_flagged: false,
+      minutesFocused: 90,
+      qualityBand: 1,
+      knowHow: 3,
+      problemSolving: 3,
+      accountability: 3,
+      rawInputs: { minutes: 90, quality: 1, K: 3, P: 3, A: 3, skillWeights: [], spiritualRelevance: null },
+      rawXPBeforeCaps: 180
+    }
+  ] : [];
+  stateSeed.archivedQuests = [];
+  stateSeed.disciplineLog = [];
+  stateSeed.dailyXPLedger = {};
+  stateSeed.xpLog = [];
+  stateSeed.disciplineRecords = {};
+  stateSeed.echoes = [];
+  stateSeed.tasks = [];
+  stateSeed.skills = [
+    { id: `lh-${scenarioName}-skill-systems`, name: "Systems", category: "Technical / Digital", tier: "proficient", xp: Math.min(3000, historyDays * 8), xpMax: 3000, tags: ["KAIRU"] },
+    { id: `lh-${scenarioName}-skill-writing`, name: "Writing", category: "Creative / Arts", tier: "moderate", xp: Math.min(1800, historyDays * 4), xpMax: 1800, tags: ["Reflection"] }
+  ];
+  stateSeed.financials = {
+    assets: historyDays * 50,
+    liabilities: Math.max(0, 10000 - historyDays * 10),
+    income: 3200,
+    expenses: config.sparse ? 0 : 2800
+  };
+
+  for (let i = 0; i < historyDays; i++) {
+    const dateString = scenarioDate(startDate, i);
+    const rawXP = 60 + (i % 6) * 20;
+    const postedXP = rawXP > 300 ? 300 + Math.floor((rawXP - 300) * 0.5) : rawXP;
+    stateSeed.disciplineLog.push({
+      disciplineId: "disc-002",
+      date: dateString,
+      rawXP,
+      postedXP,
+      xpBand: rawXP > 300 ? "overflow" : "prime"
+    });
+    stateSeed.dailyXPLedger[dateString] = {
+      rawXP,
+      postedXP
+    };
+  }
+
+  for (let i = 0; i < totalQuestCount; i++) {
+    const dateIndex = historyDays ? Math.min(historyDays - 1, Math.floor((i / Math.max(1, totalQuestCount)) * historyDays)) : 0;
+    const dateString = scenarioDate(startDate, dateIndex);
+    const rarity = scenarioRarity(i, config);
+    const quest = buildScenarioQuest(i, dateString, rarity, scenarioName);
+    stateSeed.archivedQuests.unshift(quest);
+    const ledger = stateSeed.dailyXPLedger[dateString] || { rawXP: 0, postedXP: 0 };
+    ledger.rawXP += quest.raw_cxp;
+    ledger.postedXP += quest.xp_earned;
+    stateSeed.dailyXPLedger[dateString] = ledger;
+    stateSeed.xpLog.unshift({
+      id: `lh-${scenarioName}-xp-${i}`,
+      timestamp: scenarioIsoFromDate(dateString, 18),
+      source: "quest",
+      rawXP: quest.raw_cxp,
+      postedXP: quest.xp_earned,
+      band: quest.xp_band,
+      questTitle: quest.title,
+      rarity
+    });
+  }
+
+  stateSeed.totalXP = Object.values(stateSeed.dailyXPLedger)
+    .reduce((sum, entry) => sum + (Number(entry.postedXP) || 0), 0);
+  stateSeed.disciplineRecords["disc-002"] = { bestStreak: historyDays };
+  stateSeed.resumeProfile = { rawText: "", extractedSkills: [], approvedSkillIds: [], suggestedQuests: [] };
+  stateSeed.kairuNS = null;
+
+  if (config.sparse) {
+    stateSeed.archivedQuests.unshift({
+      id: "lh-edge-missing-fields",
+      title: "Sparse Legacy Quest",
+      rarity: "Rare",
+      date_completed: scenarioDate(nowDate, -3),
+      rawInputs: null,
+      cxp_earned: 0
+    });
+    stateSeed.disciplineLog.push({ disciplineId: "missing-discipline", date: "not-a-date" });
+    stateSeed.dailyXPLedger["bad-date"] = { rawXP: "NaN", postedXP: null };
+  }
+
+  const extraStorage = {
+    questContributors: JSON.stringify(historyDays > 0 ? [{
+      questId: stateSeed.archivedQuests[0] && stateSeed.archivedQuests[0].id,
+      contributorName: "Scenario Ally",
+      contributionType: "ACCOUNTABILITY",
+      timestamp: scenarioIsoFromDate(nowDate, 9),
+      edge_type: null
+    }] : [])
+  };
+
+  if (config.namebind) {
+    extraStorage.kairu_namebind_active = "true";
+    extraStorage.kairu_namebind_date = scenarioIsoFromDate(startDate, 9);
+    extraStorage.kairu_namebind_sovereign_name = stateSeed.identity.name;
+    extraStorage.kairu_namebind_command_title = config.rank + "-Rank Operator";
+    extraStorage.kairu_namebind_voice_mode = "sovereign_witness";
+    extraStorage.kairu_namebind_coach_permission = "challenge_enabled";
+    extraStorage.kairu_namebind_ceremony_text = "Scenario Namebind active.";
+    extraStorage.kairu_namebind_identity_anchor = JSON.stringify({
+      sovereignName: stateSeed.identity.name,
+      commandTitle: extraStorage.kairu_namebind_command_title,
+      date: extraStorage.kairu_namebind_date,
+      coachPermission: "challenge_enabled"
+    });
+  }
+
+  return {
+    name: scenarioName,
+    label: config.label,
+    now: KAIRU_TIME.iso(),
+    state: stateSeed,
+    storage: extraStorage,
+    expected: {
+      daysTracked: historyDays,
+      rank: config.rank,
+      canAdvance: scenarioName === "6-months" || scenarioName === "1-year",
+      namebindActive: !!config.namebind,
+      archivedMinimum: totalQuestCount
+    }
+  };
+}
+
+function writeScenarioToStorage(scenario) {
+  LONG_HORIZON_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+  const primary = safeSetLocalStorage(STORAGE_KEY, JSON.stringify(scenario.state));
+  if (!primary.ok) {
+    handleStorageWriteFailure(primary);
+    return { ok: false, quota: primary.quota, error: primary.error };
+  }
+  let sideFailure = null;
+  Object.entries(scenario.storage || {}).forEach(([key, value]) => {
+    const written = safeSetLocalStorage(key, value);
+    if (!written.ok && !sideFailure) sideFailure = written;
+  });
+  if (sideFailure) {
+    handleStorageWriteFailure(sideFailure);
+    return { ok: false, quota: sideFailure.quota, error: sideFailure.error };
+  }
+  return { ok: true };
+}
+
+function scenarioParamValue(name) {
+  try {
+    if (typeof window === "undefined" || !window.location) return null;
+    return new URLSearchParams(window.location.search || "").get(name);
+  } catch (error) {
+    return null;
+  }
+}
+
+function installScenarioFromLocation() {
+  if (!KAIRU_TIME.isTestMode()) return null;
+  const scenarioName = scenarioParamValue("kairu_test_scenario");
+  if (!scenarioName) return null;
+  const fixedNow = scenarioParamValue("kairu_test_now");
+  if (fixedNow) KAIRU_TIME.setFixedNow(fixedNow);
+  const scenario = buildLongHorizonScenario(scenarioName, { now: fixedNow || KAIRU_TIME.iso() });
+  const written = writeScenarioToStorage(scenario);
+  // If the scenario blob overflowed the browser quota, retain it in memory so
+  // the subsequent loadState() shows the long-history state (with a warning)
+  // instead of silently booting a fresh account.
+  if (written && written.ok === false) {
+    pendingScenarioFallbackState = scenario.state;
+  }
+  return scenario;
+}
+
+function loadLongHorizonScenario(name, options = {}) {
+  if (!KAIRU_TIME.isTestMode()) {
+    throw new Error("Long-horizon scenarios are only available in KAIRU test mode.");
+  }
+  if (options.now) KAIRU_TIME.setFixedNow(options.now);
+  const scenario = buildLongHorizonScenario(name, { now: options.now || KAIRU_TIME.iso() });
+  writeScenarioToStorage(scenario);
+  state = normalizeState(scenario.state);
+  migrateStateForPhase26();
+  scanSystem();
+  maybeGenerateEveningWitness();
+  saveState();
+  renderAll();
+  return scenario;
+}
+
+installScenarioFromLocation();
+
 // One-time migration from old storage key
 (function migrateStorage() {
   const old = localStorage.getItem('lifeos_phase1_v1');
@@ -6012,7 +6606,7 @@ $$(".tab").forEach((tab) => {
         saved.serendipity = {
           buffExpiry: validExpiry,
           multiplier: mult > 0 ? mult : 1.0,
-          source: (validExpiry && Date.now() < validExpiry) ? 'legacy_migration' : null,
+          source: (validExpiry && KAIRU_TIME.nowMs() < validExpiry) ? 'legacy_migration' : null,
           flaggedQuestId: null
         };
         localStorage.setItem('kairu_v1', JSON.stringify(saved));
@@ -6147,7 +6741,7 @@ function assembleAIContext() {
   const namebindDate = ls.getItem('kairu_namebind_date') || null;
   const ceremonyText = ls.getItem('kairu_namebind_ceremony_text') || null;
 
-  const now = new Date();
+  const now = KAIRU_TIME.now();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000);
   const parseDate = (v) => {
     if (!v) return null;
@@ -6415,4 +7009,40 @@ if (typeof window !== 'undefined') {
   window.KAIRU.assembleContext = assembleAIContext;
   window.KAIRU.classifyQuery = classifyQuery;
   window.KAIRU.queryKAIRU = queryKAIRU;
+
+  if (KAIRU_TIME.isTestMode()) {
+    const cloneForTest = (value) => {
+      if (typeof structuredClone === "function") return structuredClone(value);
+      return JSON.parse(JSON.stringify(value));
+    };
+
+    window.KAIRU_TEST = {
+      scenarios: Object.keys(LONG_HORIZON_SCENARIOS),
+      time: KAIRU_TIME,
+      buildScenario: (name, options = {}) => cloneForTest(buildLongHorizonScenario(name, options)),
+      loadScenario: loadLongHorizonScenario,
+      getState: () => cloneForTest(state),
+      getStoredState: () => {
+        try {
+          return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+        } catch (error) {
+          return null;
+        }
+      },
+      setNow(value) {
+        if (!KAIRU_TIME.setFixedNow(value)) return null;
+        renderClock();
+        return KAIRU_TIME.fixedNow;
+      },
+      resetNow() {
+        KAIRU_TIME.resetFixedNow();
+        renderClock();
+        return KAIRU_TIME.fixedNow;
+      },
+      evaluateRankProgress: () => cloneForTest(evaluateRankProgress(state)),
+      canAdvanceRank: () => canAdvanceRank(state),
+      localToday,
+      renderAll
+    };
+  }
 }
