@@ -1209,14 +1209,25 @@ function normalizeState(raw) {
 let pendingScenarioFallbackState = null;
 
 function loadState() {
+  // Browser/IDB path: a blob preloaded from IndexedDB takes precedence. Test/Node
+  // path: idbPreloadedRaw stays null and we read localStorage exactly as before.
   try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const source = idbPreloadedRaw != null ? idbPreloadedRaw : localStorage.getItem(STORAGE_KEY);
+    const raw = JSON.parse(source);
     if (raw) {
       state = normalizeState(raw);
       return;
     }
   } catch (error) {
     // fall through to fallback handling below
+  }
+  // IDB read was set but unparseable/empty: fall back to the localStorage copy
+  // (kept as a backup at migration) before collapsing to a fresh account.
+  if (idbPreloadedRaw != null) {
+    try {
+      const ls = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (ls) { state = normalizeState(ls); return; }
+    } catch (e) { /* ignore and fall through */ }
   }
   if (pendingScenarioFallbackState) {
     state = normalizeState(pendingScenarioFallbackState);
@@ -1271,8 +1282,84 @@ function showStorageWarningBanner(message) {
   banner.hidden = false;
 }
 
+// ===================== DURABLE STORAGE: IndexedDB (real browser) =====================
+// localStorage caps at ~5 MB/origin; a long-history account overflows it
+// (QuotaExceededError). For real (non-test) browser use we persist the SAME single
+// state blob in IndexedDB, which holds orders of magnitude more. The in-memory
+// `state` object stays the single source of truth, so every synchronous consumer
+// (assembleContext, renderAll, all saveState callers) is unchanged. Test mode and
+// Node stay on synchronous localStorage so the long-horizon harness + tests are
+// untouched.
+const IDB_NAME = "kairu";
+const IDB_STORE = "kairu_state";
+const IDB_MIGRATED_FLAG = "kairu_idb_migrated";
+
+// Preloaded IDB blob (string) so the synchronous loadState() can read it on the
+// browser path. Null on the test/localStorage path.
+let idbPreloadedRaw = null;
+
+function usePersistentDB() {
+  try {
+    return !KAIRU_TIME.isTestMode() && typeof indexedDB !== "undefined" && indexedDB !== null;
+  } catch (e) {
+    return false;
+  }
+}
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    let req;
+    try { req = indexedDB.open(IDB_NAME, 1); }
+    catch (e) { reject(e); return; }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function idbGet(key) {
+  return idbOpen().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result === undefined ? null : req.result);
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+function idbSet(key, value) {
+  return idbOpen().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve({ ok: true });
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
+  }));
+}
+
+function idbDelete(key) {
+  return idbOpen().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => resolve({ ok: true });
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
 function saveState() {
-  const result = safeSetLocalStorage(STORAGE_KEY, JSON.stringify(state));
+  const payload = JSON.stringify(state);
+  if (usePersistentDB()) {
+    // Durable async write; fire-and-forget. On failure, surface the warning but keep
+    // the in-memory state intact (mirrors the localStorage quota guard). IndexedDB
+    // writes are transactional, so a failure leaves the prior record untouched.
+    idbSet(STORAGE_KEY, payload).catch((error) => {
+      handleStorageWriteFailure({ ok: false, quota: false, error });
+    });
+    return { ok: true };
+  }
+  const result = safeSetLocalStorage(STORAGE_KEY, payload);
   if (!result.ok) handleStorageWriteFailure(result);
   return result;
 }
@@ -2973,6 +3060,9 @@ function resetState() {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem('serendipityBuffExpiry');
   localStorage.removeItem('serendipityMultiplier');
+  if (usePersistentDB()) {
+    idbDelete(STORAGE_KEY).catch((e) => console.warn("IDB reset skipped:", e));
+  }
   state = structuredClone(defaultState);
   renderAll();
   setView("command");
@@ -6668,23 +6758,67 @@ if (!localStorage.getItem('questContributors')) {
   localStorage.setItem('questContributors', JSON.stringify([]));
 }
 
-loadState();
-migrateStateForPhase26();      // Phase 2.6: idempotent state migration (must run first)
-scanSystem();                  // Phase 2.6: build today's Nervous System snapshot
-maybeGenerateEveningWitness(); // Phase 2.6: witness + auto-echo if the day was meaningful
-maybeBacklogEcho(); // Echo: flag a high quest backlog on load (no XP awarded)
-maybeTaskBacklogEcho(); // Echo: flag high task backlog on load (no XP awarded)
-saveState();
-renderAll();
-setView('command'); // Command Center is the default landing view (syncs bottom nav)
-console.log('KAIRU CONTEXT', assembleContext());
-renderClock();
-window.setInterval(renderClock, 1000);
-window.setInterval(renderSerendipity, 1000);
-window.setTimeout(() => {
-  els.boot.classList.add("gone");
-  if (sessionStorage.getItem("kairu_sanctuary_dismissed") !== "true") showSanctuary();
-}, 1200);
+// The synchronous boot sequence. Identical ordering to before; only the trigger
+// changes (sync on the test/localStorage path, deferred behind an IDB load on the
+// real-browser path).
+function runBoot() {
+  loadState();
+  migrateStateForPhase26();      // Phase 2.6: idempotent state migration (must run first)
+  scanSystem();                  // Phase 2.6: build today's Nervous System snapshot
+  maybeGenerateEveningWitness(); // Phase 2.6: witness + auto-echo if the day was meaningful
+  maybeBacklogEcho(); // Echo: flag a high quest backlog on load (no XP awarded)
+  maybeTaskBacklogEcho(); // Echo: flag high task backlog on load (no XP awarded)
+  saveState();
+  renderAll();
+  setView('command'); // Command Center is the default landing view (syncs bottom nav)
+  console.log('KAIRU CONTEXT', assembleContext());
+  renderClock();
+  window.setInterval(renderClock, 1000);
+  window.setInterval(renderSerendipity, 1000);
+  window.setTimeout(() => {
+    els.boot.classList.add("gone");
+    if (sessionStorage.getItem("kairu_sanctuary_dismissed") !== "true") showSanctuary();
+  }, 1200);
+}
+
+// One-time, NON-DESTRUCTIVE migration of the existing localStorage state blob into
+// IndexedDB. The localStorage copy is intentionally left intact as a backup snapshot
+// (mirrors migrateToAlphaStorage above). Resolves with the blob string to preload,
+// or null for a brand-new account.
+function migrateLocalStorageToIndexedDB() {
+  return idbGet(STORAGE_KEY).then((existing) => {
+    if (existing != null) return existing; // IDB already holds data — use it as-is
+    let ls = null;
+    try { ls = localStorage.getItem(STORAGE_KEY); } catch (e) { ls = null; }
+    if (ls == null) return null;            // nothing to migrate (new user)
+    return idbSet(STORAGE_KEY, ls).then(() => {
+      try { localStorage.setItem(IDB_MIGRATED_FLAG, 'true'); } catch (e) {}
+      window.setTimeout(() => {
+        if (typeof showToast === 'function') {
+          showToast('Upgraded to high-capacity storage. Tip: export a backup from Settings.');
+        }
+      }, 1800);
+      return ls;
+    });
+  });
+}
+
+function bootWithIndexedDB() {
+  migrateLocalStorageToIndexedDB()
+    .then((raw) => { idbPreloadedRaw = raw; })
+    .catch((error) => {
+      // IndexedDB unavailable/blocked (e.g. private mode): fall back to localStorage.
+      console.warn('IndexedDB unavailable, falling back to localStorage:', error);
+      idbPreloadedRaw = null;
+    })
+    .then(() => { runBoot(); });
+}
+
+if (usePersistentDB()) {
+  bootWithIndexedDB();
+} else {
+  runBoot();
+}
 
 /* ============================================================================
    PHASE 3 // AI ROUTING CONTRACT  (skeleton — NO live API calls)
