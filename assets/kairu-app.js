@@ -304,7 +304,7 @@ const FAITH_PRESETS = {
 // the legacy quest.difficulty field),
 // discipline streak is derived from disciplineLog, XP is a SOFT
 // gate (informational, not required to advance), and advanceRank
-// returns updatedState instead of writing localStorage itself.
+// returns updatedState instead of writing storage itself.
 // ============================================================
 const RANK_CONFIG = {
 
@@ -508,6 +508,23 @@ function attemptAscend() {
 // Header subtitle: "PHASE 2.5.1 // <PAGE>", kept in sync by setView. Short page
 // names so the line stays compact on mobile (not "COMMAND CENTER").
 const PHASE_LABEL = "PHASE 2.6";
+const DEFAULT_VIEW = "command";
+const VALID_VIEWS = [
+  "command",
+  "quests",
+  "discipline",
+  "skills",
+  "tasks",
+  "pipeline",
+  "financial",
+  "chronicle"
+];
+const VIEW_ALIASES = {
+  archive: "chronicle"
+};
+const VIEW_DOM_IDS = {
+  chronicle: "archive"
+};
 const PAGE_SHORT_NAMES = {
   command: "Command",
   quests: "Quests",
@@ -1210,53 +1227,19 @@ let pendingScenarioFallbackState = null;
 
 function loadState() {
   // A scenario whose persist just failed (quota) sets this. It is the INTENDED
-  // state, so it must win over whatever stale blob may still sit in localStorage —
+  // state, so it must win over whatever stale blob may still sit in storage —
   // otherwise the 20-year fallback shows the prior scenario instead. (Only ever set
   // in test mode; null on every normal boot, so this is a no-op in production.)
   if (pendingScenarioFallbackState) {
     state = normalizeState(pendingScenarioFallbackState);
     return;
   }
-  // Browser/IDB path: a blob preloaded from IndexedDB takes precedence. Test/Node
-  // path: idbPreloadedRaw stays null and we read localStorage exactly as before.
-  try {
-    const source = idbPreloadedRaw != null ? idbPreloadedRaw : localStorage.getItem(STORAGE_KEY);
-    const raw = JSON.parse(source);
-    if (raw) {
-      state = normalizeState(raw);
-      return;
-    }
-  } catch (error) {
-    // fall through to fallback handling below
-  }
-  // IDB read was set but unparseable/empty: fall back to the localStorage copy
-  // (kept as a backup at migration) before collapsing to a fresh account.
-  if (idbPreloadedRaw != null) {
-    try {
-      const ls = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (ls) { state = normalizeState(ls); return; }
-    } catch (e) { /* ignore and fall through */ }
+  const raw = persistenceAdapter.load();
+  if (raw) {
+    state = normalizeState(raw);
+    return;
   }
   state = structuredClone(defaultState);
-}
-
-// Storage write guard. localStorage.setItem throws when the origin quota is
-// exceeded (the 20-year-history failure mode). We must NEVER let that silently
-// collapse the app back to default/fresh state — the in-memory state is the
-// real record at that moment. Catch, report, and keep memory intact.
-function safeSetLocalStorage(key, value) {
-  try {
-    localStorage.setItem(key, value);
-    return { ok: true };
-  } catch (error) {
-    const quota = !!(error && (
-      error.name === "QuotaExceededError" ||
-      error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-      error.code === 22 ||
-      error.code === 1014
-    ));
-    return { ok: false, quota, error };
-  }
 }
 
 // Surface a storage-write failure to the Player without destroying state.
@@ -1286,20 +1269,19 @@ function showStorageWarningBanner(message) {
   banner.hidden = false;
 }
 
-// ===================== DURABLE STORAGE: IndexedDB (real browser) =====================
-// localStorage caps at ~5 MB/origin; a long-history account overflows it
+// ===================== DURABLE STORAGE BACKEND (real browser) =====================
+// Web storage caps at ~5 MB/origin; a long-history account overflows it
 // (QuotaExceededError). For real (non-test) browser use we persist the SAME single
-// state blob in IndexedDB, which holds orders of magnitude more. The in-memory
-// `state` object stays the single source of truth, so every synchronous consumer
-// (assembleContext, renderAll, all saveState callers) is unchanged. Test mode and
-// Node stay on synchronous localStorage so the long-horizon harness + tests are
-// untouched.
+// state blob in a durable browser database, which holds orders of magnitude more.
+// The in-memory `state` object stays the single source of truth, so every
+// synchronous consumer (assembleContext, renderAll, all saveState callers) is
+// unchanged. Test mode and Node stay on synchronous web storage so the long-horizon
+// harness + tests are untouched. Every read/write funnels through persistenceAdapter.
 const IDB_NAME = "kairu";
 const IDB_STORE = "kairu_state";
-const IDB_MIGRATED_FLAG = "kairu_idb_migrated";
 
-// Preloaded IDB blob (string) so the synchronous loadState() can read it on the
-// browser path. Null on the test/localStorage path.
+// Preloaded durable blob (string) so the synchronous adapter.load() can read it on
+// the browser path. Null on the test path.
 let idbPreloadedRaw = null;
 
 function usePersistentDB() {
@@ -1339,33 +1321,91 @@ function idbSet(key, value) {
     tx.objectStore(IDB_STORE).put(value, key);
     tx.oncomplete = () => resolve({ ok: true });
     tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
+    tx.onabort = () => reject(tx.error || new Error("durable store transaction aborted"));
   }));
 }
 
-function idbDelete(key) {
-  return idbOpen().then((db) => new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readwrite");
-    tx.objectStore(IDB_STORE).delete(key);
-    tx.oncomplete = () => resolve({ ok: true });
-    tx.onerror = () => reject(tx.error);
-  }));
-}
+// ===================== PERSISTENCE ADAPTER =====================
+// The single gateway for all reads/writes of the main state blob (kairu_alpha_v1).
+// Exactly four methods: load / save / exportBackup / importBackup. The durable
+// browser backend above is folded in — no consumer touches web storage or the
+// durable DB for the state blob directly. Exposed as window.KAIRU.persistence for
+// the Phase 4 Supabase swap. Standalone ceremony keys (kairu_namebind_*) and the
+// one-time legacy migration keys are intentionally outside this adapter's scope.
+const persistenceAdapter = {
+  // Read and return the parsed state blob from kairu_alpha_v1 (null if absent or
+  // unreadable). Prefers the durable-DB preload on the browser path; falls back to
+  // the synchronous web-storage copy on the test path or if the preload is unusable.
+  load() {
+    try {
+      const source = idbPreloadedRaw != null ? idbPreloadedRaw : localStorage.getItem(STORAGE_KEY);
+      return JSON.parse(source);
+    } catch (error) {
+      if (idbPreloadedRaw != null) {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { /* fall through */ }
+      }
+      return null;
+    }
+  },
+
+  // Serialize and write `stateToPersist` to kairu_alpha_v1. Durable async write on
+  // the browser path; quota-guarded synchronous write on the test path. A failed
+  // write never destroys the in-memory record. Returns { ok, quota?, error? }.
+  save(stateToPersist) {
+    const payload = JSON.stringify(stateToPersist);
+    if (usePersistentDB()) {
+      // Durable async write; fire-and-forget. On failure, surface the warning but
+      // keep the in-memory state intact. Durable writes are transactional, so a
+      // failure leaves the prior record untouched.
+      idbSet(STORAGE_KEY, payload).catch((error) => {
+        handleStorageWriteFailure({ ok: false, quota: false, error });
+      });
+      return { ok: true };
+    }
+    // Clear first so a quota-failed write cannot leave a stale prior blob behind for
+    // load() to pick up instead of the intended fallback. (20-year quota fix.)
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+    try {
+      localStorage.setItem(STORAGE_KEY, payload);
+      return { ok: true };
+    } catch (error) {
+      const quota = !!(error && (
+        error.name === "QuotaExceededError" ||
+        error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+        error.code === 22 ||
+        error.code === 1014
+      ));
+      const result = { ok: false, quota, error };
+      handleStorageWriteFailure(result);
+      return result;
+    }
+  },
+
+  // Return the full state wrapped as a timestamped, downloadable backup payload.
+  exportBackup() {
+    return {
+      kairuBackup: true,
+      version: STORAGE_KEY,          // "kairu_alpha_v1"
+      exportedAt: KAIRU_TIME.iso(),
+      state: state
+    };
+  },
+
+  // Validate an imported backup (wrapped { state } or a raw state object), apply the
+  // same normalization as a fresh load, replace the in-memory state, and persist it.
+  // Returns { ok, result? } or { ok: false, reason }.
+  importBackup(data) {
+    const rawState = (data && data.kairuBackup && data.state) ? data.state : data;
+    if (!rawState || typeof rawState !== "object") {
+      return { ok: false, reason: "invalid" };
+    }
+    state = normalizeState(rawState);
+    return { ok: true, result: this.save(state) };
+  }
+};
 
 function saveState() {
-  const payload = JSON.stringify(state);
-  if (usePersistentDB()) {
-    // Durable async write; fire-and-forget. On failure, surface the warning but keep
-    // the in-memory state intact (mirrors the localStorage quota guard). IndexedDB
-    // writes are transactional, so a failure leaves the prior record untouched.
-    idbSet(STORAGE_KEY, payload).catch((error) => {
-      handleStorageWriteFailure({ ok: false, quota: false, error });
-    });
-    return { ok: true };
-  }
-  const result = safeSetLocalStorage(STORAGE_KEY, payload);
-  if (!result.ok) handleStorageWriteFailure(result);
-  return result;
+  return persistenceAdapter.save(state);
 }
 
 function compound() {
@@ -1603,16 +1643,43 @@ function difficultyClass(difficulty) {
   return String(difficulty || "Common").toLowerCase();
 }
 
-function setView(view) {
-  $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.view === view));
-  $$(".view").forEach((section) => section.classList.toggle("active", section.id === view));
+function normalizeViewId(viewId) {
+  const candidate = String(viewId || "").replace(/^#/, "").toLowerCase();
+  const aliased = VIEW_ALIASES[candidate] || candidate;
+  return VALID_VIEWS.includes(aliased) ? aliased : DEFAULT_VIEW;
+}
+
+function getDomViewId(viewId) {
+  const normalized = normalizeViewId(viewId);
+  return VIEW_DOM_IDS[normalized] || normalized;
+}
+
+function getViewFromHash() {
+  return normalizeViewId(window.location.hash);
+}
+
+function hasValidViewHash() {
+  const hash = String(window.location.hash || "").replace(/^#/, "").toLowerCase();
+  const normalized = VIEW_ALIASES[hash] || hash;
+  return VALID_VIEWS.includes(normalized);
+}
+
+function navigateToView(viewId, options = { push: true }) {
+  const routeView = normalizeViewId(viewId);
+  const domView = getDomViewId(routeView);
+  const currentHashView = getViewFromHash();
+  const shouldPush = !options || options.push !== false;
+  const isSameView = currentHashView === routeView;
+
+  $$(".tab").forEach((tab) => tab.classList.toggle("active", normalizeViewId(tab.dataset.view) === routeView));
+  $$(".view").forEach((section) => section.classList.toggle("active", section.id === domView));
 
   // Mobile bottom nav: highlight the matching primary item. Views that live behind
   // the "More" sheet (tasks/pipeline/financial/archive) leave every primary inactive.
-  $$(".bottom-nav__item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
+  $$(".bottom-nav__item").forEach((item) => item.classList.toggle("active", normalizeViewId(item.dataset.view) === routeView));
   closeMore();
 
-  const nextCopy = copy[view];
+  const nextCopy = copy[domView];
   if (nextCopy) {
     els.viewEyebrow.textContent = nextCopy.eyebrow;
     els.viewTitle.textContent = nextCopy.title;
@@ -1621,21 +1688,39 @@ function setView(view) {
   // Dynamic header subtitle: PHASE 2.5.1 // CURRENT PAGE (uppercased via CSS).
   const subEl = document.getElementById("brandSub");
   if (subEl) {
-    const pageName = PAGE_SHORT_NAMES[view] || (nextCopy && nextCopy.title) || view;
+    const pageName = PAGE_SHORT_NAMES[domView] || (nextCopy && nextCopy.title) || routeView;
     subEl.textContent = `${PHASE_LABEL} // ${pageName}`;
   }
 
   // The lock / Track-Today control lives in the shared header status row but is a
   // Command-dashboard concern — show it only on the command view.
   const trackPanelEl = document.getElementById("trackPanel");
-  if (trackPanelEl) trackPanelEl.style.display = (view === "command") ? "" : "none";
+  if (trackPanelEl) trackPanelEl.style.display = (routeView === "command") ? "" : "none";
 
   updateViewStatus();
+
+  if (shouldPush && !isSameView) {
+    history.pushState({ view: routeView }, "", "#" + routeView);
+  }
 
   // Bring the freshly shown view into focus on mobile (content scrolls under header).
   const mainEl = document.querySelector(".main");
   if (mainEl) mainEl.scrollTo({ top: 0, behavior: "auto" });
 }
+
+function setView(view, options = { push: true }) {
+  navigateToView(view, options);
+}
+
+function initializeViewRouting() {
+  const initialView = hasValidViewHash() ? getViewFromHash() : DEFAULT_VIEW;
+  history.replaceState({ view: initialView }, "", "#" + initialView);
+  navigateToView(initialView, { push: false });
+}
+
+window.addEventListener("popstate", () => {
+  navigateToView(getViewFromHash(), { push: false });
+});
 
 function openMore() {
   const sheet = document.getElementById("moreSheet");
@@ -2232,7 +2317,7 @@ function addEcho(entry) {
   if (!Array.isArray(state.echoes)) state.echoes = [];
   const echo = normalizeEcho(entry);
   state.echoes.unshift(echo);
-  // Keep the reflective log bounded so localStorage stays small.
+  // Keep the reflective log bounded so stored state stays small.
   if (state.echoes.length > 200) state.echoes.length = 200;
   return echo;
 }
@@ -3102,13 +3187,14 @@ function saveFinance() {
 
 function resetState() {
   if (!window.confirm("Wipe all KAIRU Phase 1 state? This cannot be undone.")) return;
-  localStorage.removeItem(STORAGE_KEY);
+  // Reset the main state blob through the adapter (overwrites both backends with a
+  // fresh default; load() of a default blob is equivalent to an absent key).
+  state = structuredClone(defaultState);
+  persistenceAdapter.save(state);
+  // Legacy standalone serendipity keys (pre-migration installs) — outside the
+  // adapter's scope, cleared directly.
   localStorage.removeItem('serendipityBuffExpiry');
   localStorage.removeItem('serendipityMultiplier');
-  if (usePersistentDB()) {
-    idbDelete(STORAGE_KEY).catch((e) => console.warn("IDB reset skipped:", e));
-  }
-  state = structuredClone(defaultState);
   renderAll();
   setView("command");
   showToast("State reset");
@@ -3116,17 +3202,12 @@ function resetState() {
 
 // ===================== BACKUP: EXPORT / IMPORT =====================
 // Lets the full state travel across browsers, machines, or a file rename
-// (Firefox isolates localStorage per file path, so renaming a local file
+// (Firefox isolates web storage per file path, so renaming a local file
 // looks like a reset -- export here, rename, then import to carry data over).
 
 function exportBackup() {
   try {
-    const payload = {
-      kairuBackup: true,
-      version: STORAGE_KEY,            // "kairu_alpha_v1"
-      exportedAt: KAIRU_TIME.iso(),
-      state: state
-    };
+    const payload = persistenceAdapter.exportBackup();
     const json = JSON.stringify(payload, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -3157,16 +3238,20 @@ function handleImportFile(file) {
     try {
       const parsed = JSON.parse(reader.result);
       // Accept either a wrapped backup { state: {...} } or a raw state object.
-      const rawState = (parsed && parsed.kairuBackup && parsed.state) ? parsed.state : parsed;
-      if (!rawState || typeof rawState !== "object") {
+      const preview = (parsed && parsed.kairuBackup && parsed.state) ? parsed.state : parsed;
+      if (!preview || typeof preview !== "object") {
         showToast("Not a valid KAIRU backup");
         return;
       }
       if (!window.confirm("Import this backup? It will REPLACE your current KAIRU data in this browser.")) {
         return;
       }
-      state = normalizeState(rawState);   // reconcile + apply same defaults/migrations as load
-      saveState();                        // persist under the current STORAGE_KEY
+      // Adapter validates, normalizes, replaces in-memory state, and persists.
+      const imported = persistenceAdapter.importBackup(parsed);
+      if (!imported.ok) {
+        showToast("Not a valid KAIRU backup");
+        return;
+      }
       renderAll();
       setView("command");
       showToast("Backup imported successfully");
@@ -5037,7 +5122,7 @@ function forceRescan() {
    - Never fires a second time once kairu_namebind_active === 'true'.
    - Modal is non-dismissible (no X, no outside-click, no Escape).
    - State reads bind to the REAL v2.5 schema: state.kairuNS / state.archivedQuests
-     (the spec's localStorage reads are the same data via the state-of-record).
+     (the spec's web-storage reads are the same data via the state-of-record).
    - The nine kairu_namebind_* keys are written as standalone localStorage keys,
      Supabase-ready (namebind_events table). They are NOT part of the state blob. */
 
@@ -6288,7 +6373,7 @@ document.addEventListener("click", (event) => {
   if (action === "close-coach-export") closeCoachExport();
   if (action === "copy-coach-export") copyCoachExport();
   // Mobile navigation + skill onboarding
-  if (action === "goview") setView(actionTarget.dataset.view);
+  if (action === "goview") navigateToView(actionTarget.dataset.view);
   if (action === "open-more") openMore();
   if (action === "close-more") closeMore();
   if (action === "apply-career") {
@@ -6296,7 +6381,7 @@ document.addEventListener("click", (event) => {
     if (sel) applyCareerPreset(sel.value);
   }
   if (action === "onboard-resume") {
-    setView("skills");
+    navigateToView("skills");
     const ta = document.getElementById("resumeTextInput");
     if (ta) { ta.scrollIntoView({ behavior: "smooth", block: "center" }); window.setTimeout(() => ta.focus(), 200); }
   }
@@ -6336,7 +6421,7 @@ $$(".modal-bg").forEach((modal) => {
 });
 
 $$(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => setView(tab.dataset.view));
+  tab.addEventListener("click", () => navigateToView(tab.dataset.view));
 });
 
 ['questMinutes','questQuality','questKnowHow','questProblemSolving','questAccountability'].forEach(id => {
@@ -6635,20 +6720,27 @@ function buildLongHorizonScenario(name, options = {}) {
 }
 
 function writeScenarioToStorage(scenario) {
-  LONG_HORIZON_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
-  // Clear the main state key BEFORE attempting the (possibly quota-failing) write,
-  // so a failed write cannot leave a previous scenario's blob behind for loadState()
+  // Standalone side keys (questContributors + kairu_namebind_*) live outside the
+  // persistence adapter's scope; clear them directly before reseeding.
+  LONG_HORIZON_STORAGE_KEYS.forEach((key) => { try { localStorage.removeItem(key); } catch (e) { /* ignore */ } });
+  // Main state blob goes through the adapter. Its save() clears any stale blob first,
+  // so a quota-failed write cannot leave a previous scenario behind for loadState()
   // to pick up instead of the intended fallback. (20-year quota fallback fix.)
-  localStorage.removeItem(STORAGE_KEY);
-  const primary = safeSetLocalStorage(STORAGE_KEY, JSON.stringify(scenario.state));
+  const primary = persistenceAdapter.save(scenario.state);
   if (!primary.ok) {
-    handleStorageWriteFailure(primary);
+    // save() already surfaced the warning banner; just propagate the failure.
     return { ok: false, quota: primary.quota, error: primary.error };
   }
   let sideFailure = null;
   Object.entries(scenario.storage || {}).forEach(([key, value]) => {
-    const written = safeSetLocalStorage(key, value);
-    if (!written.ok && !sideFailure) sideFailure = written;
+    try {
+      localStorage.setItem(key, value);
+    } catch (error) {
+      if (!sideFailure) {
+        const quota = !!(error && (error.name === "QuotaExceededError" || error.code === 22 || error.code === 1014));
+        sideFailure = { ok: false, quota, error };
+      }
+    }
   });
   if (sideFailure) {
     handleStorageWriteFailure(sideFailure);
@@ -6812,7 +6904,7 @@ if (!localStorage.getItem('questContributors')) {
 }
 
 // The synchronous boot sequence. Identical ordering to before; only the trigger
-// changes (sync on the test/localStorage path, deferred behind an IDB load on the
+// changes (sync on the test path, deferred behind a durable-store preload on the
 // real-browser path).
 function runBoot() {
   loadState();
@@ -6823,7 +6915,7 @@ function runBoot() {
   maybeTaskBacklogEcho(); // Echo: flag high task backlog on load (no XP awarded)
   saveState();
   renderAll();
-  setView('command'); // Command Center is the default landing view (syncs bottom nav)
+  initializeViewRouting(); // Restore hash route, or normalize to Command.
   console.log('KAIRU CONTEXT', assembleContext());
   renderClock();
   window.setInterval(renderClock, 1000);
@@ -6834,41 +6926,41 @@ function runBoot() {
   }, 1200);
 }
 
-// One-time, NON-DESTRUCTIVE migration of the existing localStorage state blob into
-// IndexedDB. The localStorage copy is intentionally left intact as a backup snapshot
-// (mirrors migrateToAlphaStorage above). Resolves with the blob string to preload,
-// or null for a brand-new account.
-function migrateLocalStorageToIndexedDB() {
+// One-time, NON-DESTRUCTIVE preload of the durable backend. If the durable DB has
+// no copy yet, migrate the current web-storage blob up (the web-storage copy is left
+// intact as a backup snapshot, mirroring migrateToAlphaStorage above). Sets
+// idbPreloadedRaw to the blob the synchronous adapter.load() should use, or null for
+// a brand-new account. Reads the existing blob through the adapter so the only
+// state-blob storage access stays inside persistenceAdapter.
+function preloadDurableState() {
   return idbGet(STORAGE_KEY).then((existing) => {
-    if (existing != null) return existing; // IDB already holds data — use it as-is
-    let ls = null;
-    try { ls = localStorage.getItem(STORAGE_KEY); } catch (e) { ls = null; }
-    if (ls == null) return null;            // nothing to migrate (new user)
-    return idbSet(STORAGE_KEY, ls).then(() => {
-      try { localStorage.setItem(IDB_MIGRATED_FLAG, 'true'); } catch (e) {}
+    if (existing != null) { idbPreloadedRaw = existing; return; } // durable DB wins
+    const parsed = persistenceAdapter.load(); // reads web storage (preload still null)
+    if (parsed == null) { idbPreloadedRaw = null; return; } // nothing to migrate (new user)
+    const blob = JSON.stringify(parsed);
+    return idbSet(STORAGE_KEY, blob).then(() => {
+      idbPreloadedRaw = blob;
       window.setTimeout(() => {
         if (typeof showToast === 'function') {
           showToast('Upgraded to high-capacity storage. Tip: export a backup from Settings.');
         }
       }, 1800);
-      return ls;
     });
   });
 }
 
-function bootWithIndexedDB() {
-  migrateLocalStorageToIndexedDB()
-    .then((raw) => { idbPreloadedRaw = raw; })
+function bootDurable() {
+  preloadDurableState()
     .catch((error) => {
-      // IndexedDB unavailable/blocked (e.g. private mode): fall back to localStorage.
-      console.warn('IndexedDB unavailable, falling back to localStorage:', error);
+      // Durable backend unavailable/blocked (e.g. private mode): fall back to web storage.
+      console.warn('Durable storage unavailable, falling back to web storage:', error);
       idbPreloadedRaw = null;
     })
     .then(() => { runBoot(); });
 }
 
 if (usePersistentDB()) {
-  bootWithIndexedDB();
+  bootDurable();
 } else {
   runBoot();
 }
@@ -6901,7 +6993,7 @@ if (usePersistentDB()) {
        completion via getCalendarCells(id, days)
      - financial                       <- state.financials (+ incomeConfig fallback); no incomeLog/expenses.total exist
      - skills carry tier + xp, not a numeric level
-   Pure function. No side effects. No localStorage writes. Graceful on empty state.
+   Pure function. No side effects. No storage writes. Graceful on empty state.
    ========================================================================== */
 
 const CONTEXT_SCHEMA_VERSION = '1.0';
@@ -6917,7 +7009,7 @@ function assembleAIContext() {
   const financials = s.financials || {};
   const incomeConfig = s.incomeConfig || {};
 
-  // Namebind ceremony writes standalone localStorage keys (NOT inside the state
+  // Namebind ceremony writes standalone storage keys (NOT inside the state
   // blob). Read defensively so a fresh install returns clean defaults.
   const ls = (typeof localStorage !== 'undefined') ? localStorage : { getItem: () => null };
   const sovereignName = ls.getItem('kairu_namebind_sovereign_name') || 'Player';
@@ -7193,6 +7285,7 @@ async function queryKAIRU(userInput) {
 // assembleContext(). callLeftBrain/callRightBrain are intentionally NOT exported.
 if (typeof window !== 'undefined') {
   window.KAIRU = window.KAIRU || {};
+  window.KAIRU.persistence = persistenceAdapter; // Phase 4 Supabase swap point
   window.KAIRU.assembleContext = assembleAIContext;
   window.KAIRU.classifyQuery = classifyQuery;
   window.KAIRU.queryKAIRU = queryKAIRU;
@@ -7209,13 +7302,7 @@ if (typeof window !== 'undefined') {
       buildScenario: (name, options = {}) => cloneForTest(buildLongHorizonScenario(name, options)),
       loadScenario: loadLongHorizonScenario,
       getState: () => cloneForTest(state),
-      getStoredState: () => {
-        try {
-          return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-        } catch (error) {
-          return null;
-        }
-      },
+      getStoredState: () => persistenceAdapter.load(),
       setNow(value) {
         if (!KAIRU_TIME.setFixedNow(value)) return null;
         renderClock();
