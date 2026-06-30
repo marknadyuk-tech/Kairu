@@ -606,6 +606,15 @@ const defaultState = {
   // direct localStorage call -- it rides the main state blob through
   // persistenceAdapter like archivedQuests/activeQuests above.
   economic_agency_events: [],
+  // Doc 13 V1.1: per-faculty "has the maintenance_nudge already fired for
+  // this staleness episode" marker. Keyed by faculty, value is the ISO
+  // occurred_at of that faculty's most-recent event at the moment it fired.
+  // Same persistence pattern as economic_agency_events above -- rides the
+  // single state blob through persistenceAdapter, no direct localStorage.*
+  // call. A fresh event changes the faculty's most-recent-event timestamp,
+  // which naturally stops matching the stored marker -- no explicit clear
+  // needed; see deriveEconomicAgencyFaculty.
+  economic_agency_nudges_fired: {},
   dailyXPLedger: {},
   xpLog: [],
   rankHistory: [],
@@ -1526,6 +1535,11 @@ function normalizeState(raw) {
   merged.economic_agency_events = Array.isArray(merged.economic_agency_events)
     ? merged.economic_agency_events.filter((e) => e && typeof e === "object" && typeof e.event_id === "string")
     : [];
+  merged.economic_agency_nudges_fired = (merged.economic_agency_nudges_fired
+    && typeof merged.economic_agency_nudges_fired === "object"
+    && !Array.isArray(merged.economic_agency_nudges_fired))
+    ? merged.economic_agency_nudges_fired
+    : {};
   merged.dailyXPLedger = (merged.dailyXPLedger && typeof merged.dailyXPLedger === 'object')
     ? merged.dailyXPLedger : {};
   merged.xpLog = Array.isArray(merged.xpLog) ? merged.xpLog : [];
@@ -1892,8 +1906,12 @@ function economicAgencyMostRecentEventAgeDays(facultyEvents, nowMs) {
 }
 
 // Derives current_score/peak_score/levels/state/directive for one faculty.
-// Pure: never mutates the event log, never stores its output (section 4.3).
-function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs) {
+// Pure with respect to its inputs: never mutates the event log or the
+// nudgeFiredMarkers map passed in, never stores its own output. The
+// maintenance_nudge once-check below READS nudgeFiredMarkers; persisting a
+// newly-fired marker is the caller's job (see renderEconomicAgency), same
+// separation of concerns logEconomicAgencyEvent already uses for writes.
+function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs, nudgeFiredMarkers) {
   const facultyEvents = allEvents.filter((e) => e && e.faculty === faculty);
   const currentScore = facultyEvents.reduce((sum, e) => sum + economicAgencyDecayedPoints(e, nowMs), 0);
   const peakScore = facultyEvents.reduce((sum, e) => sum + economicAgencyRawPoints(e), 0);
@@ -1902,6 +1920,12 @@ function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs) {
 
   const freshAny = economicAgencyHasFreshEvent(facultyEvents, nowMs);
   const freshVerified = economicAgencyHasFreshEvent(facultyEvents, nowMs, { verifiedOnly: true });
+  // ISO occurred_at of this faculty's most-recent event -- the suppression
+  // key for the maintenance_nudge once-check below, and also exposed on the
+  // return value so the caller knows what to persist when it fires.
+  const mostRecentEventAt = facultyEvents.length
+    ? new Date(Math.max(...facultyEvents.map((e) => new Date(e.occurred_at).getTime()))).toISOString()
+    : null;
 
   // Section 9's three rules, applied in order:
   let state, directive;
@@ -1920,15 +1944,18 @@ function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs) {
     // RESOLVED (was flagged as a spec gap): peak_level >= 2, current_level
     // still == peak_level, no fresh event in the last 30 days. This is a
     // maintenance-nudge case, not a decay case -- the ledger stays
-    // untouched, no event is written, nothing is stored. state stays ACTIVE
-    // per owner ruling. directive is re-derived from event timestamps every
-    // render (never stored): it surfaces once, on the day staleness is
-    // first crossed, then falls back to null on later renders until either
-    // a fresh event resets the clock (back to "advance") or decay drops
-    // current_level below peak_level (into LAPSED).
+    // untouched, no event is written. state stays ACTIVE per owner ruling.
+    // Suppression is a persisted marker (state.economic_agency_nudges_fired),
+    // not a render-timing heuristic: fires once per staleness episode (the
+    // episode is identified by mostRecentEventAt), then suppresses on every
+    // later render where the stored marker still matches. A fresh event
+    // changes mostRecentEventAt, so the old marker stops matching and the
+    // nudge can fire again -- no explicit clear needed. The LAPSED branch
+    // above is checked first in this if/else chain, so real decay supersedes
+    // the nudge by branch order, also without needing to clear the marker.
     state = "ACTIVE";
-    const daysSinceLastEvent = economicAgencyMostRecentEventAgeDays(facultyEvents, nowMs);
-    directive = daysSinceLastEvent === ECONOMIC_AGENCY_FRESH_WINDOW_DAYS ? "maintenance_nudge" : null;
+    const alreadyFired = Boolean(nudgeFiredMarkers) && nudgeFiredMarkers[faculty] === mostRecentEventAt;
+    directive = alreadyFired ? null : "maintenance_nudge";
   }
 
   const decayDisclosure = state === "LAPSED"
@@ -1943,16 +1970,18 @@ function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs) {
     peak_level: peakLevel,
     state,
     directive,
-    decayDisclosure
+    decayDisclosure,
+    nudge_marker: mostRecentEventAt
   };
 }
 
-function deriveEconomicAgency(events, nowMs) {
+function deriveEconomicAgency(events, nowMs, nudgeFiredMarkers) {
   const safeEvents = Array.isArray(events) ? events : [];
   const evalMs = Number.isFinite(nowMs) ? nowMs : KAIRU_TIME.nowMs();
+  const safeNudgeMarkers = (nudgeFiredMarkers && typeof nudgeFiredMarkers === "object") ? nudgeFiredMarkers : {};
   const faculties = {};
   ECONOMIC_AGENCY_FACULTIES.forEach((faculty) => {
-    faculties[faculty] = deriveEconomicAgencyFaculty(faculty, safeEvents, evalMs);
+    faculties[faculty] = deriveEconomicAgencyFaculty(faculty, safeEvents, evalMs, safeNudgeMarkers);
   });
 
   // bottleneck: lowest current_level, ties broken by lowest current_score (section 4.3).
@@ -3536,7 +3565,21 @@ function renderEconomicAgency() {
   populateEconomicAgencyEventOptions();
   if (formEl) formEl.hidden = !economicAgencyFormOpen;
 
-  const derived = deriveEconomicAgency(state.economic_agency_events, KAIRU_TIME.nowMs());
+  const derived = deriveEconomicAgency(state.economic_agency_events, KAIRU_TIME.nowMs(), state.economic_agency_nudges_fired);
+
+  // Persist newly-fired maintenance_nudge markers so the once-check survives
+  // reload instead of depending on catching a narrow render-timing window.
+  // Idempotent: only writes (and only calls saveState) the render a marker
+  // actually needs to change, not on every render this branch is active.
+  let nudgeMarkersChanged = false;
+  ECONOMIC_AGENCY_FACULTIES.forEach((faculty) => {
+    const d = derived.faculties[faculty];
+    if (d.directive === "maintenance_nudge" && state.economic_agency_nudges_fired[faculty] !== d.nudge_marker) {
+      state.economic_agency_nudges_fired[faculty] = d.nudge_marker;
+      nudgeMarkersChanged = true;
+    }
+  });
+  if (nudgeMarkersChanged) saveState();
 
   if (bottleneckEl) {
     bottleneckEl.innerHTML = derived.bottleneck
@@ -8261,7 +8304,11 @@ if (typeof window !== 'undefined') {
       // Doc 13: Economic Agency test surface.
       logEconomicAgencyEvent,
       deriveEconomicAgency: (nowMs) => cloneForTest(
-        deriveEconomicAgency(state.economic_agency_events, Number.isFinite(nowMs) ? nowMs : KAIRU_TIME.nowMs())
+        deriveEconomicAgency(
+          state.economic_agency_events,
+          Number.isFinite(nowMs) ? nowMs : KAIRU_TIME.nowMs(),
+          state.economic_agency_nudges_fired
+        )
       ),
       clearResume,
       renderEconomicAgency,
