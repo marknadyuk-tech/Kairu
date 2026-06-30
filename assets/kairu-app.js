@@ -1917,15 +1917,18 @@ function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs) {
       ? (ECONOMIC_AGENCY_INTERNAL_ASSET_FACULTIES.includes(faculty) ? "reclaim_engaged_internal" : "reclaim_engaged_external")
       : "reclaim_locked";
   } else {
-    // GAP IN SPEC (flagged, not resolved silently): peak_level >= 2,
-    // current_level still == peak_level, but no fresh event in the last 30
-    // days. Section 9's three rules don't cover this combination -- it isn't
-    // BEGINNER (peak > 1), isn't ACTIVE (no fresh event), and isn't LAPSED
-    // (level hasn't actually dropped yet). None of the seven section 13 exit
-    // conditions exercise this branch, so it's resolved conservatively here
-    // (no directive surfaced) rather than inventing un-specced UX copy.
+    // RESOLVED (was flagged as a spec gap): peak_level >= 2, current_level
+    // still == peak_level, no fresh event in the last 30 days. This is a
+    // maintenance-nudge case, not a decay case -- the ledger stays
+    // untouched, no event is written, nothing is stored. state stays ACTIVE
+    // per owner ruling. directive is re-derived from event timestamps every
+    // render (never stored): it surfaces once, on the day staleness is
+    // first crossed, then falls back to null on later renders until either
+    // a fresh event resets the clock (back to "advance") or decay drops
+    // current_level below peak_level (into LAPSED).
     state = "ACTIVE";
-    directive = null;
+    const daysSinceLastEvent = economicAgencyMostRecentEventAgeDays(facultyEvents, nowMs);
+    directive = daysSinceLastEvent === ECONOMIC_AGENCY_FRESH_WINDOW_DAYS ? "maintenance_nudge" : null;
   }
 
   const decayDisclosure = state === "LAPSED"
@@ -1989,6 +1992,9 @@ function logEconomicAgencyEvent({ faculty, event_key, verification_tier, evidenc
     event_key,
     occurred_at: KAIRU_TIME.iso(),
     verification_tier,
+    // evidence_ref is free-text, stored as-is -- no input sanitization here.
+    // Escape on output only: any future UI that surfaces this field must
+    // route it through escapeHTML, same as the rest of renderEconomicAgency.
     evidence_ref: evidence_ref || null,
     source,
     initiated_by: initiated_by || null
@@ -3483,6 +3489,7 @@ function economicAgencyDirectiveText(faculty, derived) {
   switch (derived.directive) {
     case "build": return "Build this from scratch.";
     case "advance": return `Push the frontier in ${name}.`;
+    case "maintenance_nudge": return `No new ${name} signal in 30 days -- log one before this starts to lapse.`;
     case "reclaim_locked": return "You had assets here. Naming the peak only -- this pays nothing until reality confirms re-entry.";
     case "reclaim_engaged_internal": return "The framework is intact. Execute it again.";
     case "reclaim_engaged_external": return "You had assets here. Test which are still warm.";

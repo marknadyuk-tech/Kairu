@@ -20,7 +20,7 @@ Copy-Item "$src\assets\kairu.css"    "$dst\assets\kairu.css"    -Force
 $srcSha = (git -C $src rev-parse --short HEAD).Trim()
 $srcDirty = git -C $src status --porcelain
 if ($srcDirty) {
-  Write-Host "WARNING: C:\dev\KAIRU has uncommitted changes — deploying a build that isn't fully committed to Kairu-source." -ForegroundColor Yellow
+  Write-Host "WARNING: C:\dev\KAIRU has uncommitted changes -- deploying a build that isn't fully committed to Kairu-source." -ForegroundColor Yellow
   $srcSha = "$srcSha-dirty"
 }
 $stamp = "<!-- source: $srcSha @ $(Get-Date -Format 'yyyy-MM-dd HH:mm') -->"
