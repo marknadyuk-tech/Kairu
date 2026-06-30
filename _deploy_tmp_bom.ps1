@@ -1,4 +1,4 @@
-# KAIRU Pages — one-command redeploy.
+﻿# KAIRU Pages — one-command redeploy.
 # Copies the latest live build from the main project into this public folder,
 # then commits + pushes so GitHub Pages updates. Run this whenever you change
 # KAIRU v2.5.html / assets and want the phone version refreshed.
@@ -37,3 +37,4 @@ if (git -C $dst status --porcelain) {
 } else {
   Write-Host "`nNothing changed since last deploy." -ForegroundColor Yellow
 }
+

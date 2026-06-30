@@ -182,6 +182,22 @@ const PIPELINE_STAGES = ['Identified', 'Applied', 'Interview', 'Offer'];
 
 const STORAGE_KEY = "kairu_alpha_v1";
 const LEGACY_STORAGE_KEY = "kairu_v1";
+const FOUNDER_METRICS_KEY = "founder_metrics";
+const FOUNDER_TEST_START_DATE = "2026-06-30";
+const FOUNDER_TEST_LENGTH_DAYS = 30;
+const FOUNDER_BUG_SEVERITIES = ["low", "medium", "high", "critical"];
+const FOUNDER_BUG_AREAS = [
+  "Command",
+  "Quests",
+  "Discipline",
+  "Skills",
+  "Tasks",
+  "Pipeline",
+  "Financial",
+  "Chronicle",
+  "Storage",
+  "Other"
+];
 const FAITH_DISCIPLINE_ID = "faith-belief-protocol";
 const FAITH_DISCIPLINE_PREFIX = "faith-protocol-";
 
@@ -586,6 +602,10 @@ const defaultState = {
   lastTrackDate: null,
   activeQuests: [],
   archivedQuests: [],
+  // Doc 13 V1: immutable Economic Agency event log. Never written/read via a
+  // direct localStorage call -- it rides the main state blob through
+  // persistenceAdapter like archivedQuests/activeQuests above.
+  economic_agency_events: [],
   dailyXPLedger: {},
   xpLog: [],
   rankHistory: [],
@@ -652,6 +672,11 @@ const defaultState = {
 
 let state = structuredClone(defaultState);
 let pendingQuestId = null;
+const founderMetricsUi = {
+  bugFormOpen: false,
+  fixFormOpen: false,
+  frictionFormOpen: false
+};
 
 function assembleContext() {
   const s = state;
@@ -778,6 +803,322 @@ function localToday() {
 
 function createId(prefix) {
   return crypto.randomUUID ? crypto.randomUUID() : `${prefix}-${KAIRU_TIME.nowMs()}-${Math.random()}`;
+}
+
+function getFounderTestEndDate() {
+  return KAIRU_TIME.formatLocalDate(KAIRU_TIME.addDays(FOUNDER_TEST_START_DATE, FOUNDER_TEST_LENGTH_DAYS - 1));
+}
+
+function emptyFounderMetrics() {
+  return {
+    testStartDate: FOUNDER_TEST_START_DATE,
+    testLengthDays: FOUNDER_TEST_LENGTH_DAYS,
+    dailyOpenLog: [],
+    trackedDayLog: [],
+    coachBriefExportLog: [],
+    bugLog: [],
+    frictionLog: []
+  };
+}
+
+function normalizeFounderMetrics(raw = {}) {
+  const base = emptyFounderMetrics();
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    testStartDate: source.testStartDate || base.testStartDate,
+    testLengthDays: Number(source.testLengthDays) || base.testLengthDays,
+    dailyOpenLog: Array.isArray(source.dailyOpenLog) ? source.dailyOpenLog : [],
+    trackedDayLog: Array.isArray(source.trackedDayLog) ? source.trackedDayLog : [],
+    coachBriefExportLog: Array.isArray(source.coachBriefExportLog) ? source.coachBriefExportLog : [],
+    bugLog: Array.isArray(source.bugLog) ? source.bugLog : [],
+    frictionLog: Array.isArray(source.frictionLog) ? source.frictionLog : []
+  };
+}
+
+function getFounderMetrics() {
+  try {
+    return normalizeFounderMetrics(JSON.parse(localStorage.getItem(FOUNDER_METRICS_KEY) || "null"));
+  } catch (error) {
+    return emptyFounderMetrics();
+  }
+}
+
+function saveFounderMetrics(metrics) {
+  const normalized = normalizeFounderMetrics(metrics);
+  localStorage.setItem(FOUNDER_METRICS_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function validDateString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function isFounderDateInWindow(dateString) {
+  const date = String(dateString || "");
+  return validDateString(date)
+    && date >= FOUNDER_TEST_START_DATE
+    && date <= getFounderTestEndDate();
+}
+
+function founderElapsedEndDate(today = localToday()) {
+  if (today < FOUNDER_TEST_START_DATE) return null;
+  const end = getFounderTestEndDate();
+  return today > end ? end : today;
+}
+
+function isFounderDateElapsed(dateString, today = localToday()) {
+  const elapsedEnd = founderElapsedEndDate(today);
+  return !!elapsedEnd && isFounderDateInWindow(dateString) && String(dateString) <= elapsedEnd;
+}
+
+function founderElapsedDays(today = localToday()) {
+  const elapsedEnd = founderElapsedEndDate(today);
+  if (!elapsedEnd) return 0;
+  const start = KAIRU_TIME.fromLocalDate(FOUNDER_TEST_START_DATE);
+  const end = KAIRU_TIME.fromLocalDate(elapsedEnd);
+  return Math.min(FOUNDER_TEST_LENGTH_DAYS, Math.max(0, Math.floor((end - start) / 86400000) + 1));
+}
+
+function uniqueFounderDates(log = [], today = localToday()) {
+  return new Set((Array.isArray(log) ? log : [])
+    .map(entry => entry && entry.date)
+    .filter(date => isFounderDateElapsed(date, today)));
+}
+
+function founderQuestCompletedDate(quest = {}) {
+  const date = quest.date_completed || quest.completedAt || quest.completed_at;
+  return String(date || "").slice(0, 10);
+}
+
+function founderQuestCXP(quest = {}) {
+  const xpType = normalizeXpType(quest.xpType);
+  if (xpType === "spiritual") return 0;
+  return Number(quest.cxp_earned ?? quest.raw_cxp ?? quest.xp_earned ?? quest.raw_xp) || 0;
+}
+
+function founderQuestSXP(quest = {}) {
+  const xpType = normalizeXpType(quest.xpType);
+  if (xpType !== "spiritual" && xpType !== "mixed") return 0;
+  return Number(quest.sxp_earned ?? quest.raw_sxp ?? (xpType === "spiritual" ? (quest.raw_cxp ?? quest.raw_xp ?? quest.xp_earned) : 0)) || 0;
+}
+
+function founderQuestKXP(quest = {}) {
+  if (normalizeXpType(quest.xpType) === "spiritual") return 0;
+  const skillXpEarned = quest.skillXpEarned && typeof quest.skillXpEarned === "object" ? quest.skillXpEarned : {};
+  return Object.values(skillXpEarned).reduce((sum, value) => sum + (Number(value) || 0), 0);
+}
+
+function founderDisciplineSXP(today = localToday()) {
+  const log = Array.isArray(state.disciplineLog) ? state.disciplineLog : [];
+  const discs = Array.isArray(state.disciplines) ? state.disciplines : [];
+  const spiritualIds = new Set(discs.filter(isSpiritualDiscipline).map(disc => disc.id));
+  if (!spiritualIds.size) return 0;
+  return log.reduce((sum, entry) => {
+    return entry && spiritualIds.has(entry.disciplineId) && isFounderDateElapsed(entry.date, today)
+      ? sum + (Number(entry.postedXP ?? entry.rawXP) || 0)
+      : sum;
+  }, 0);
+}
+
+function founderXPLogKXP(today = localToday()) {
+  const log = Array.isArray(state.xpLog) ? state.xpLog : [];
+  return log.reduce((sum, entry) => {
+    const date = String(entry && (entry.date || entry.timestamp || "")).slice(0, 10);
+    return isFounderDateElapsed(date, today)
+      ? sum + (Number(entry && entry.kxpEarned) || 0)
+      : sum;
+  }, 0);
+}
+
+function logDailyOpen(viewOpened = "Command") {
+  const metrics = getFounderMetrics();
+  const today = localToday();
+  if (!metrics.dailyOpenLog.some(entry => entry && entry.date === today)) {
+    metrics.dailyOpenLog.push({
+      date: today,
+      openedAt: KAIRU_TIME.iso(),
+      viewOpened: String(viewOpened || "Command")
+    });
+    saveFounderMetrics(metrics);
+  }
+  return metrics;
+}
+
+function logTrackedDay() {
+  const metrics = getFounderMetrics();
+  const today = localToday();
+  if (!metrics.trackedDayLog.some(entry => entry && entry.date === today)) {
+    metrics.trackedDayLog.push({
+      date: today,
+      activatedAt: KAIRU_TIME.iso()
+    });
+    saveFounderMetrics(metrics);
+  }
+  return metrics;
+}
+
+function logCoachBriefExport() {
+  const metrics = getFounderMetrics();
+  metrics.coachBriefExportLog.push({
+    date: localToday(),
+    exportedAt: KAIRU_TIME.iso()
+  });
+  saveFounderMetrics(metrics);
+  return metrics;
+}
+
+function founderBugTimestamp() {
+  const now = KAIRU_TIME.now();
+  return localToday().replace(/-/g, "")
+    + "_"
+    + String(now.getHours()).padStart(2, "0")
+    + String(now.getMinutes()).padStart(2, "0")
+    + String(now.getSeconds()).padStart(2, "0");
+}
+
+function createFounderBugId(metrics) {
+  const base = `bug_${founderBugTimestamp()}`;
+  const existing = new Set((metrics.bugLog || []).map(bug => bug && bug.id));
+  if (!existing.has(base)) return base;
+  let suffix = 2;
+  while (existing.has(`${base}_${suffix}`)) suffix += 1;
+  return `${base}_${suffix}`;
+}
+
+function normalizeFounderSeverity(value) {
+  const severity = String(value || "").toLowerCase();
+  return FOUNDER_BUG_SEVERITIES.includes(severity) ? severity : "medium";
+}
+
+function normalizeFounderArea(value) {
+  const area = String(value || "").trim();
+  return FOUNDER_BUG_AREAS.includes(area) ? area : "Other";
+}
+
+function addBugFound({ title, description, severity, area } = {}) {
+  const cleanTitle = String(title || "").trim();
+  if (!cleanTitle) return null;
+  const metrics = getFounderMetrics();
+  const entry = {
+    id: createFounderBugId(metrics),
+    title: cleanTitle.slice(0, 120),
+    description: String(description || "").trim().slice(0, 1000),
+    foundDate: localToday(),
+    foundAt: KAIRU_TIME.iso(),
+    status: "found",
+    fixedDate: null,
+    fixedAt: null,
+    severity: normalizeFounderSeverity(severity),
+    area: normalizeFounderArea(area)
+  };
+  metrics.bugLog.push(entry);
+  saveFounderMetrics(metrics);
+  return entry;
+}
+
+function markBugFixed(bugId) {
+  const metrics = getFounderMetrics();
+  const bug = metrics.bugLog.find(entry => entry && entry.id === bugId && entry.status !== "fixed");
+  if (!bug) return null;
+  bug.status = "fixed";
+  bug.fixedDate = localToday();
+  bug.fixedAt = KAIRU_TIME.iso();
+  saveFounderMetrics(metrics);
+  return bug;
+}
+
+function logFriction(score, note = "") {
+  const numericScore = Math.max(1, Math.min(5, Math.round(Number(score) || 0)));
+  const metrics = getFounderMetrics();
+  const today = localToday();
+  const existing = metrics.frictionLog.find(entry => entry && entry.date === today);
+  const entry = {
+    date: today,
+    score: numericScore,
+    note: String(note || "").trim().slice(0, 500),
+    submittedAt: KAIRU_TIME.iso()
+  };
+  if (existing) {
+    Object.assign(existing, entry);
+  } else {
+    metrics.frictionLog.push(entry);
+  }
+  saveFounderMetrics(metrics);
+  return entry;
+}
+
+function computeFounderMetricsSummary() {
+  const metrics = getFounderMetrics();
+  const today = localToday();
+  const elapsedDays = founderElapsedDays(today);
+  const windowEnd = getFounderTestEndDate();
+  const completedQuests = (Array.isArray(state.archivedQuests) ? state.archivedQuests : [])
+    .filter(quest => isFounderDateElapsed(founderQuestCompletedDate(quest), today));
+  const archivedSkillXP = completedQuests.reduce((sum, quest) => sum + founderQuestKXP(quest), 0);
+  const xpLogSkillXP = founderXPLogKXP(today);
+  const frictionEntries = metrics.frictionLog.filter(entry => entry && isFounderDateElapsed(entry.date, today));
+  const frictionAverage = frictionEntries.length
+    ? Math.round((frictionEntries.reduce((sum, entry) => sum + (Number(entry.score) || 0), 0) / frictionEntries.length) * 10) / 10
+    : null;
+  const trackedDates = uniqueFounderDates(metrics.trackedDayLog, today);
+  const openDates = uniqueFounderDates(metrics.dailyOpenLog, today);
+
+  return {
+    testStartDate: metrics.testStartDate,
+    testEndDate: windowEnd,
+    testLengthDays: metrics.testLengthDays,
+    dayOfTest: elapsedDays,
+    elapsedTestDays: elapsedDays,
+    dailyOpens: openDates.size,
+    trackedDays: trackedDates.size,
+    missedDays: Math.max(0, elapsedDays - trackedDates.size),
+    questsCompleted: completedQuests.length,
+    cxpEarned: completedQuests.reduce((sum, quest) => sum + founderQuestCXP(quest), 0),
+    sxpEarned: completedQuests.reduce((sum, quest) => sum + founderQuestSXP(quest), 0) + founderDisciplineSXP(today),
+    skillXpGained: archivedSkillXP || xpLogSkillXP,
+    coachBriefExports: metrics.coachBriefExportLog.filter(entry => entry && isFounderDateElapsed(entry.date, today)).length,
+    bugsFound: metrics.bugLog.filter(entry => entry && isFounderDateElapsed(entry.foundDate, today)).length,
+    bugsFixed: metrics.bugLog.filter(entry => entry && entry.status === "fixed" && isFounderDateElapsed(entry.fixedDate, today)).length,
+    averageFriction: frictionAverage,
+    todayOpened: metrics.dailyOpenLog.some(entry => entry && entry.date === today),
+    todayTracked: metrics.trackedDayLog.some(entry => entry && entry.date === today),
+    todayFrictionLogged: metrics.frictionLog.some(entry => entry && entry.date === today)
+  };
+}
+
+function exportFounderMetrics() {
+  try {
+    const metrics = getFounderMetrics();
+    const summary = computeFounderMetricsSummary();
+    const payload = {
+      kairuFounderValidation: true,
+      exportedAt: KAIRU_TIME.iso(),
+      summary,
+      rawLogs: {
+        dailyOpenLog: metrics.dailyOpenLog,
+        trackedDayLog: metrics.trackedDayLog,
+        coachBriefExportLog: metrics.coachBriefExportLog,
+        bugLog: metrics.bugLog,
+        frictionLog: metrics.frictionLog
+      },
+      founderMetrics: metrics
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kairu-founder-validation-${localToday()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("Founder metrics exported");
+    return payload;
+  } catch (error) {
+    console.warn("Founder metrics export failed:", error);
+    showToast("Founder metrics export failed");
+    return null;
+  }
 }
 
 function minutesFromTime(value) {
@@ -1179,6 +1520,12 @@ function normalizeState(raw) {
     : [...defaultState.skills];
   merged.incomeConfig = merged.incomeConfig || defaultState.incomeConfig;
   merged.archivedQuests = Array.isArray(merged.archivedQuests) ? merged.archivedQuests : [];
+  // Doc 13: defensive type-safety only on load (corrupted/legacy saves) --
+  // event rows themselves are never field-rewritten; immutability lives in the
+  // app logic (logEconomicAgencyEvent only ever pushes, never edits).
+  merged.economic_agency_events = Array.isArray(merged.economic_agency_events)
+    ? merged.economic_agency_events.filter((e) => e && typeof e === "object" && typeof e.event_id === "string")
+    : [];
   merged.dailyXPLedger = (merged.dailyXPLedger && typeof merged.dailyXPLedger === 'object')
     ? merged.dailyXPLedger : {};
   merged.xpLog = Array.isArray(merged.xpLog) ? merged.xpLog : [];
@@ -1406,6 +1753,250 @@ const persistenceAdapter = {
 
 function saveState() {
   return persistenceAdapter.save(state);
+}
+
+// ===================== ECONOMIC AGENCY ENGINE (Doc 13 V1) =====================
+// Optional elevation track ("KAIRU shows the door, never pushes the player
+// through it" -- Doc 13 section 0). A faculty level is never assigned; it is
+// derived from an immutable, weighted, verification-tiered event log. Events
+// are raw truth and are never mutated; every score/level/directive below is
+// computed on read from state.economic_agency_events. See
+// _archive/docs/KAIRU-Doc13-Economic-Agency-Spec-V1.md for the full spec --
+// this implements section 13's seven exit conditions only.
+//
+// Spec section 4.1 names "economic_agency_events" as the localStorage key.
+// This codebase's existing convention (archivedQuests, activeQuests, etc.) is
+// that such "keys" are fields on the single state blob persisted as one unit
+// via persistenceAdapter, not standalone localStorage entries -- so that's
+// what's built here. No direct localStorage.* call exists anywhere for this
+// field (enforced by a regression test in tests/long-horizon.test.js).
+
+const ECONOMIC_AGENCY_FACULTIES = ["PERCEPTION", "PACKAGING", "PERSUASION", "PRODUCTION", "COMPOUNDING"];
+
+const ECONOMIC_AGENCY_DISPLAY_NAMES = {
+  PERCEPTION: "Perception",
+  PACKAGING: "Packaging",
+  PERSUASION: "Persuasion",
+  PRODUCTION: "Production",
+  COMPOUNDING: "Compounding"
+};
+
+const ECONOMIC_AGENCY_SUBTITLES = {
+  PERCEPTION: "Signal Detection",
+  PACKAGING: "Offer Formation",
+  PERSUASION: "Trust Transfer",
+  PRODUCTION: "Execution Conversion",
+  COMPOUNDING: "Compounding Judgment"
+};
+
+// Internal-asset faculties: frameworks/judgment survive dormancy ("the
+// framework is intact"). External-asset faculties: demand/trust live in other
+// people and decay faster -- also logged in the spec as the justification for
+// per-faculty half-lives later (section 9 / section 12, deferred).
+const ECONOMIC_AGENCY_INTERNAL_ASSET_FACULTIES = ["PACKAGING", "PRODUCTION", "COMPOUNDING"];
+
+const ECONOMIC_AGENCY_VERIFICATION_TIERS = ["SELF_REPORTED", "INTEGRATION_VERIFIED", "FINANCIAL_VERIFIED"];
+
+const ECONOMIC_AGENCY_TIER_MULTIPLIERS = {
+  SELF_REPORTED: 1.0,
+  INTEGRATION_VERIFIED: 1.5,
+  FINANCIAL_VERIFIED: 2.0
+};
+
+// event_key -> { faculty, base, description }. Section 5's five tables,
+// flattened into one lookup. base = points before the tier multiplier.
+const ECONOMIC_AGENCY_EVENTS = {
+  pain_signal_logged: { faculty: "PERCEPTION", base: 1, description: "Documented a specific pain from a real person or source" },
+  market_conversation_completed: { faculty: "PERCEPTION", base: 2, description: "Real conversation with a potential buyer about their problem" },
+  pricing_gap_identified: { faculty: "PERCEPTION", base: 2, description: "Documented a competitor or market pricing gap with evidence" },
+  demand_pattern_validated: { faculty: "PERCEPTION", base: 4, description: "Found multiple people (5+) with the same expensive problem" },
+  willingness_to_pay_confirmed: { faculty: "PERCEPTION", base: 4, description: "A real person stated or showed they would pay" },
+
+  risk_reversal_added: { faculty: "PACKAGING", base: 2, description: "Added a guarantee or risk reversal to an offer" },
+  offer_drafted: { faculty: "PACKAGING", base: 2, description: "Wrote a structured offer (user, pain, outcome, timeframe, price, proof)" },
+  offer_iterated_on_feedback: { faculty: "PACKAGING", base: 3, description: "Revised the offer after real market feedback" },
+  price_tested: { faculty: "PACKAGING", base: 3, description: "Presented a specific price to a real prospect" },
+  offer_published: { faculty: "PACKAGING", base: 4, description: "Offer is live somewhere a stranger can see or buy it" },
+
+  stranger_replied_interest: { faculty: "PERSUASION", base: 1, description: "A stranger replied with real interest" },
+  stranger_took_action: { faculty: "PERSUASION", base: 2, description: "A stranger booked a call, signed up, or took a requested action" },
+  referral_received: { faculty: "PERSUASION", base: 7, description: "An unprompted referral, someone vouched for you to a stranger" },
+  stranger_became_paying_customer: { faculty: "PERSUASION", base: 4, description: "A stranger paid" },
+  repeat_customer_or_testimonial: { faculty: "PERSUASION", base: 6, description: "A repeat purchase or a volunteered testimonial" },
+
+  defect_resolved: { faculty: "PRODUCTION", base: 2, description: "Fixed a delivery problem fast, kept chaos low" },
+  delivery_on_time: { faculty: "PRODUCTION", base: 2, description: "Met the promised timeframe" },
+  proof_artifact_created: { faculty: "PRODUCTION", base: 3, description: "Created proof of delivery (case study, before/after, deliverable)" },
+  delivery_completed: { faculty: "PRODUCTION", base: 3, description: "Delivered the promised outcome" },
+  customer_satisfaction_confirmed: { faculty: "PRODUCTION", base: 3, description: "Customer confirmed satisfaction" },
+  positive_review_received: { faculty: "PRODUCTION", base: 4, description: "A public review was posted" },
+
+  bottleneck_removed: { faculty: "COMPOUNDING", base: 3, description: "Identified and removed a bottleneck" },
+  task_delegated: { faculty: "COMPOUNDING", base: 3, description: "Handed a recurring task to a person or system" },
+  reinvestment_logged: { faculty: "COMPOUNDING", base: 3, description: "Reinvested time, money, or attention into a higher-leverage loop" },
+  process_automated: { faculty: "COMPOUNDING", base: 4, description: "Automated a repeatable task" },
+  margin_improved: { faculty: "COMPOUNDING", base: 4, description: "Documented a margin improvement with numbers" },
+  repeatable_system_built: { faculty: "COMPOUNDING", base: 5, description: "Turned one win into a repeatable acquisition or delivery system" },
+  recurring_revenue_established: { faculty: "COMPOUNDING", base: 8, description: "Landed a retainer, subscription, or repeat-revenue structure" }
+};
+
+// Cumulative-points -> level ladder (section 7), shared across all five
+// faculties in V1. Array index IS the level; V1 caps at level 5.
+const ECONOMIC_AGENCY_LEVEL_THRESHOLDS = [0, 5, 20, 50, 120, 300];
+
+// V1: one global half-life value for every faculty. Keyed per-faculty (not a
+// single flat constant) so per-faculty tuning later is a config edit, not a
+// refactor (section 4.2 / section 12 -- explicitly deferred, not built).
+const ECONOMIC_AGENCY_FACULTY_HALFLIFE_DAYS = {
+  PERCEPTION: 180, PACKAGING: 180, PERSUASION: 180, PRODUCTION: 180, COMPOUNDING: 180
+};
+
+const ECONOMIC_AGENCY_FRESH_WINDOW_DAYS = 30;
+const ECONOMIC_AGENCY_MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function economicAgencyRawPoints(event) {
+  const def = ECONOMIC_AGENCY_EVENTS[event.event_key];
+  const base = def ? def.base : 0;
+  const mult = ECONOMIC_AGENCY_TIER_MULTIPLIERS[event.verification_tier] || 0;
+  return base * mult;
+}
+
+function economicAgencyDecayedPoints(event, nowMs) {
+  const ageDays = (nowMs - new Date(event.occurred_at).getTime()) / ECONOMIC_AGENCY_MS_PER_DAY;
+  const halfLife = ECONOMIC_AGENCY_FACULTY_HALFLIFE_DAYS[event.faculty] || 180;
+  return economicAgencyRawPoints(event) * Math.pow(0.5, ageDays / halfLife);
+}
+
+function economicAgencyLevelFromScore(score) {
+  let level = 0;
+  for (let i = 0; i < ECONOMIC_AGENCY_LEVEL_THRESHOLDS.length; i++) {
+    if (score >= ECONOMIC_AGENCY_LEVEL_THRESHOLDS[i]) level = i;
+  }
+  return level;
+}
+
+function economicAgencyHasFreshEvent(facultyEvents, nowMs, { verifiedOnly = false } = {}) {
+  const windowMs = ECONOMIC_AGENCY_FRESH_WINDOW_DAYS * ECONOMIC_AGENCY_MS_PER_DAY;
+  return facultyEvents.some((e) => {
+    const ageMs = nowMs - new Date(e.occurred_at).getTime();
+    if (ageMs < 0 || ageMs > windowMs) return false;
+    if (verifiedOnly && e.verification_tier === "SELF_REPORTED") return false;
+    return true;
+  });
+}
+
+function economicAgencyMostRecentEventAgeDays(facultyEvents, nowMs) {
+  if (!facultyEvents.length) return null;
+  const mostRecentMs = Math.max(...facultyEvents.map((e) => new Date(e.occurred_at).getTime()));
+  return Math.floor((nowMs - mostRecentMs) / ECONOMIC_AGENCY_MS_PER_DAY);
+}
+
+// Derives current_score/peak_score/levels/state/directive for one faculty.
+// Pure: never mutates the event log, never stores its output (section 4.3).
+function deriveEconomicAgencyFaculty(faculty, allEvents, nowMs) {
+  const facultyEvents = allEvents.filter((e) => e && e.faculty === faculty);
+  const currentScore = facultyEvents.reduce((sum, e) => sum + economicAgencyDecayedPoints(e, nowMs), 0);
+  const peakScore = facultyEvents.reduce((sum, e) => sum + economicAgencyRawPoints(e), 0);
+  const currentLevel = economicAgencyLevelFromScore(currentScore);
+  const peakLevel = economicAgencyLevelFromScore(peakScore);
+
+  const freshAny = economicAgencyHasFreshEvent(facultyEvents, nowMs);
+  const freshVerified = economicAgencyHasFreshEvent(facultyEvents, nowMs, { verifiedOnly: true });
+
+  // Section 9's three rules, applied in order:
+  let state, directive;
+  if (peakLevel <= 1) {
+    state = "BEGINNER";
+    directive = "build";
+  } else if (currentLevel === peakLevel && freshAny) {
+    state = "ACTIVE";
+    directive = "advance";
+  } else if (peakLevel >= 2 && currentLevel < peakLevel) {
+    state = "LAPSED";
+    directive = freshVerified
+      ? (ECONOMIC_AGENCY_INTERNAL_ASSET_FACULTIES.includes(faculty) ? "reclaim_engaged_internal" : "reclaim_engaged_external")
+      : "reclaim_locked";
+  } else {
+    // GAP IN SPEC (flagged, not resolved silently): peak_level >= 2,
+    // current_level still == peak_level, but no fresh event in the last 30
+    // days. Section 9's three rules don't cover this combination -- it isn't
+    // BEGINNER (peak > 1), isn't ACTIVE (no fresh event), and isn't LAPSED
+    // (level hasn't actually dropped yet). None of the seven section 13 exit
+    // conditions exercise this branch, so it's resolved conservatively here
+    // (no directive surfaced) rather than inventing un-specced UX copy.
+    state = "ACTIVE";
+    directive = null;
+  }
+
+  const decayDisclosure = state === "LAPSED"
+    ? `${ECONOMIC_AGENCY_DISPLAY_NAMES[faculty]} dropped to level ${currentLevel} (peak ${peakLevel}). No event logged in ${economicAgencyMostRecentEventAgeDays(facultyEvents, nowMs)} days.`
+    : null;
+
+  return {
+    faculty,
+    current_score: currentScore,
+    peak_score: peakScore,
+    current_level: currentLevel,
+    peak_level: peakLevel,
+    state,
+    directive,
+    decayDisclosure
+  };
+}
+
+function deriveEconomicAgency(events, nowMs) {
+  const safeEvents = Array.isArray(events) ? events : [];
+  const evalMs = Number.isFinite(nowMs) ? nowMs : KAIRU_TIME.nowMs();
+  const faculties = {};
+  ECONOMIC_AGENCY_FACULTIES.forEach((faculty) => {
+    faculties[faculty] = deriveEconomicAgencyFaculty(faculty, safeEvents, evalMs);
+  });
+
+  // bottleneck: lowest current_level, ties broken by lowest current_score (section 4.3).
+  let bottleneck = null;
+  ECONOMIC_AGENCY_FACULTIES.forEach((faculty) => {
+    if (!bottleneck) { bottleneck = faculty; return; }
+    const a = faculties[faculty], b = faculties[bottleneck];
+    if (a.current_level < b.current_level || (a.current_level === b.current_level && a.current_score < b.current_score)) {
+      bottleneck = faculty;
+    }
+  });
+
+  return { faculties, bottleneck };
+}
+
+// Mutator: the only way an Economic Agency event row is ever created. Pushes
+// onto state.economic_agency_events and persists through saveState() ->
+// persistenceAdapter.save(state) only -- no direct localStorage call exists
+// for this field anywhere in the app.
+function logEconomicAgencyEvent({ faculty, event_key, verification_tier, evidence_ref = null, source = "earned", initiated_by = null }) {
+  const def = ECONOMIC_AGENCY_EVENTS[event_key];
+  if (!def) throw new Error(`Unknown Economic Agency event_key: ${event_key}`);
+  const resolvedFaculty = faculty || def.faculty;
+  if (resolvedFaculty !== def.faculty) {
+    throw new Error(`event_key "${event_key}" belongs to faculty "${def.faculty}", not "${faculty}"`);
+  }
+  if (!ECONOMIC_AGENCY_VERIFICATION_TIERS.includes(verification_tier)) {
+    throw new Error(`Unknown verification_tier: ${verification_tier}`);
+  }
+  if (source !== "earned" && source !== "resume") {
+    throw new Error(`Invalid source: ${source}`);
+  }
+
+  const event = {
+    event_id: crypto.randomUUID ? crypto.randomUUID() : `eae-${KAIRU_TIME.nowMs()}-${Math.random()}`,
+    faculty: resolvedFaculty,
+    event_key,
+    occurred_at: KAIRU_TIME.iso(),
+    verification_tier,
+    evidence_ref: evidence_ref || null,
+    source,
+    initiated_by: initiated_by || null
+  };
+  if (!Array.isArray(state.economic_agency_events)) state.economic_agency_events = [];
+  state.economic_agency_events.push(event);
+  saveState();
+  return event;
 }
 
 function compound() {
@@ -1738,8 +2329,7 @@ function trackToday() {
     return;
   }
 
-  state.daysTracked += 1;
-  state.lastTrackDate = localToday();
+  ensureTrackedToday();
   saveState();
   renderAll();
   showToast("Tracking locked // +3% XP active");
@@ -1980,6 +2570,7 @@ function ensureTrackedToday() {
   if (isTrackedToday()) return false;
   state.daysTracked += 1;
   state.lastTrackDate = localToday();
+  logTrackedDay();
   return true;
 }
 
@@ -2766,6 +3357,9 @@ function buildResumeSuggestedQuests() {
 }
 
 function clearResume() {
+  // Doc 13 section 4.1: events with source:"resume" are permanent once logged
+  // and must survive a resume-import purge. This only ever touches
+  // state.resumeProfile, never state.economic_agency_events -- intentional.
   state.resumeProfile = { rawText: "", extractedSkills: [], approvedSkillIds: [], suggestedQuests: [] };
   if (els.resumeText) els.resumeText.value = "";
   saveState();
@@ -2861,6 +3455,105 @@ function renderResume() {
             </div>`).join("")}
         </div>`;
     }
+  }
+}
+
+let economicAgencyFormOpen = false;
+
+// Populates the event-key dropdown once (grouped by faculty via optgroup) from
+// the canonical ECONOMIC_AGENCY_EVENTS table, so the form can never drift from
+// the section 5 event tables. Guarded by a dataset flag -- safe to call on
+// every render without fighting an in-progress selection.
+function populateEconomicAgencyEventOptions() {
+  const select = document.getElementById("eaEventKeyInput");
+  if (!select || select.dataset.populated === "true") return;
+  select.innerHTML = ECONOMIC_AGENCY_FACULTIES.map((faculty) => {
+    const options = Object.keys(ECONOMIC_AGENCY_EVENTS)
+      .filter((key) => ECONOMIC_AGENCY_EVENTS[key].faculty === faculty)
+      .map((key) => `<option value="${key}">${escapeHTML(ECONOMIC_AGENCY_EVENTS[key].description)}</option>`)
+      .join("");
+    return `<optgroup label="${escapeHTML(ECONOMIC_AGENCY_DISPLAY_NAMES[faculty])}">${options}</optgroup>`;
+  }).join("");
+  select.dataset.populated = "true";
+}
+
+// Section 9's directive language, including the internal/external reclaim split.
+function economicAgencyDirectiveText(faculty, derived) {
+  const name = ECONOMIC_AGENCY_DISPLAY_NAMES[faculty];
+  switch (derived.directive) {
+    case "build": return "Build this from scratch.";
+    case "advance": return `Push the frontier in ${name}.`;
+    case "reclaim_locked": return "You had assets here. Naming the peak only -- this pays nothing until reality confirms re-entry.";
+    case "reclaim_engaged_internal": return "The framework is intact. Execute it again.";
+    case "reclaim_engaged_external": return "You had assets here. Test which are still warm.";
+    default: return "";
+  }
+}
+
+function toggleEconomicAgencyForm() {
+  economicAgencyFormOpen = !economicAgencyFormOpen;
+  renderEconomicAgency();
+}
+
+function logEconomicAgencyEventFromForm() {
+  const eventKeyEl = document.getElementById("eaEventKeyInput");
+  const tierEl = document.getElementById("eaTierInput");
+  const evidenceEl = document.getElementById("eaEvidenceInput");
+  const event_key = eventKeyEl && eventKeyEl.value;
+  const verification_tier = tierEl && tierEl.value;
+  if (!ECONOMIC_AGENCY_EVENTS[event_key] || !verification_tier) {
+    showToast("Pick an event and a verification tier");
+    return;
+  }
+  logEconomicAgencyEvent({
+    event_key,
+    verification_tier,
+    evidence_ref: (evidenceEl && evidenceEl.value.trim()) || null,
+    source: "earned",
+    initiated_by: "USER"
+  });
+  if (evidenceEl) evidenceEl.value = "";
+  renderEconomicAgency();
+  showToast("Economic Agency event logged");
+}
+
+// Renders the bottleneck callout + five faculty cards (level/state/directive,
+// decay disclosure when LAPSED). Section 13 ECs 2/4/5/6 all resolve to this
+// render path being correct for a given state.economic_agency_events.
+function renderEconomicAgency() {
+  const facultiesEl = document.getElementById("economicAgencyFaculties");
+  const bottleneckEl = document.getElementById("economicAgencyBottleneck");
+  const formEl = document.getElementById("economicAgencyForm");
+  if (!facultiesEl && !bottleneckEl) return;
+
+  populateEconomicAgencyEventOptions();
+  if (formEl) formEl.hidden = !economicAgencyFormOpen;
+
+  const derived = deriveEconomicAgency(state.economic_agency_events, KAIRU_TIME.nowMs());
+
+  if (bottleneckEl) {
+    bottleneckEl.innerHTML = derived.bottleneck
+      ? `<div class="pill rare" data-testid="ea-bottleneck">Bottleneck: ${escapeHTML(ECONOMIC_AGENCY_DISPLAY_NAMES[derived.bottleneck])} -- active directive</div>`
+      : "";
+  }
+
+  if (facultiesEl) {
+    facultiesEl.innerHTML = ECONOMIC_AGENCY_FACULTIES.map((faculty) => {
+      const d = derived.faculties[faculty];
+      const directiveText = economicAgencyDirectiveText(faculty, d);
+      const decayLine = d.decayDisclosure
+        ? `<p class="draft-skill__cat" data-testid="ea-decay-disclosure">${escapeHTML(d.decayDisclosure)}</p>`
+        : "";
+      return `
+        <article class="card" data-faculty="${faculty}" data-testid="ea-faculty-card">
+          <h4>${escapeHTML(ECONOMIC_AGENCY_DISPLAY_NAMES[faculty])}</h4>
+          <p class="draft-skill__cat">${escapeHTML(ECONOMIC_AGENCY_SUBTITLES[faculty])}</p>
+          <div>Current Level: <b data-testid="ea-current-level">${d.current_level}</b> &middot; Peak Level: <b data-testid="ea-peak-level">${d.peak_level}</b></div>
+          <span class="pill ${derived.bottleneck === faculty ? "rare" : "uncommon"}" data-testid="ea-state">${d.state}</span>
+          <p data-testid="ea-directive">${escapeHTML(directiveText)}</p>
+          ${decayLine}
+        </article>`;
+    }).join("");
   }
 }
 
@@ -3081,6 +3774,8 @@ function buildCoachBrief() {
 }
 
 function openCoachExport() {
+  logCoachBriefExport();
+  renderFounderMetricsPanel();
   const brief = buildCoachBrief();
   if (els.coachExportText) els.coachExportText.value = brief;
   showModal(els.coachExportModal);
@@ -3310,6 +4005,213 @@ function renderMetrics() {
 
   renderRank();
   renderDailyXPStatus();
+}
+
+function founderYesNo(value) {
+  return value ? "yes" : "no";
+}
+
+function founderMetricItem(label, value) {
+  return `
+    <div class="founder-metric">
+      <span>${escapeHTML(label)}</span>
+      <b>${escapeHTML(value)}</b>
+    </div>`;
+}
+
+function founderBugOptions(selectedId = "") {
+  const openBugs = getFounderMetrics().bugLog.filter(bug => bug && bug.status !== "fixed");
+  if (!openBugs.length) return '<option value="">No unfixed bugs</option>';
+  return openBugs.map(bug => {
+    const selected = bug.id === selectedId ? " selected" : "";
+    return `<option value="${escapeHTML(bug.id)}"${selected}>${escapeHTML(bug.title || bug.id)}</option>`;
+  }).join("");
+}
+
+function founderSeverityOptions(selected = "medium") {
+  return FOUNDER_BUG_SEVERITIES.map(severity => {
+    const isSelected = severity === selected ? " selected" : "";
+    return `<option value="${severity}"${isSelected}>${severity}</option>`;
+  }).join("");
+}
+
+function founderAreaOptions(selected = "Command") {
+  return FOUNDER_BUG_AREAS.map(area => {
+    const isSelected = area === selected ? " selected" : "";
+    return `<option value="${escapeHTML(area)}"${isSelected}>${escapeHTML(area)}</option>`;
+  }).join("");
+}
+
+function founderOpenBugsHTML(metrics) {
+  const openBugs = metrics.bugLog.filter(bug => bug && bug.status !== "fixed");
+  if (!openBugs.length) {
+    return '<div class="founder-empty">No open bugs logged.</div>';
+  }
+  return openBugs.slice(-4).reverse().map(bug => `
+    <div class="founder-bug-row">
+      <span>${escapeHTML(bug.title || "Untitled bug")}</span>
+      <b>${escapeHTML(bug.severity || "medium")} // ${escapeHTML(bug.area || "Other")}</b>
+    </div>
+  `).join("");
+}
+
+function renderFounderMetricsPanel() {
+  const container = document.getElementById("founderMetricsPanel");
+  if (!container) return;
+
+  const metrics = getFounderMetrics();
+  const summary = computeFounderMetricsSummary();
+  const todayFriction = metrics.frictionLog.find(entry => entry && entry.date === localToday());
+  const averageFriction = summary.averageFriction == null
+    ? "-- / 5"
+    : `${summary.averageFriction.toFixed(1)} / 5`;
+  const openBugs = metrics.bugLog.filter(bug => bug && bug.status !== "fixed");
+
+  const frictionOptions = [1, 2, 3, 4, 5].map(score => {
+    const selected = Number(todayFriction && todayFriction.score) === score ? " selected" : "";
+    const label = {
+      1: "1 - smooth",
+      2: "2 - minor",
+      3: "3 - noticeable",
+      4: "4 - high",
+      5: "5 - painful"
+    }[score];
+    return `<option value="${score}"${selected}>${label}</option>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="founder-panel">
+      <div class="founder-panel__top">
+        <div>
+          <div class="founder-window">Test Window: ${summary.testStartDate} to ${summary.testEndDate}</div>
+          <h3 class="founder-title">Day ${summary.dayOfTest} of ${summary.testLengthDays}</h3>
+        </div>
+        <button class="btn ghost" type="button" data-action="export-founder-metrics">Export Founder Metrics</button>
+      </div>
+
+      <div class="founder-grid">
+        ${founderMetricItem("Daily Opens", `${summary.dailyOpens} / ${summary.testLengthDays}`)}
+        ${founderMetricItem("Tracked Days", `${summary.trackedDays} / ${summary.testLengthDays}`)}
+        ${founderMetricItem("Missed Days", String(summary.missedDays))}
+        ${founderMetricItem("Quests Completed", String(summary.questsCompleted))}
+        ${founderMetricItem("CXP Earned", summary.cxpEarned.toLocaleString())}
+        ${founderMetricItem("SXP Earned", summary.sxpEarned.toLocaleString())}
+        ${founderMetricItem("Skill XP Gained", summary.skillXpGained.toLocaleString())}
+        ${founderMetricItem("Coach Brief Exports", String(summary.coachBriefExports))}
+        ${founderMetricItem("Bugs Found", String(summary.bugsFound))}
+        ${founderMetricItem("Bugs Fixed", String(summary.bugsFixed))}
+        ${founderMetricItem("Average Friction", averageFriction)}
+      </div>
+
+      <div class="founder-today">
+        <span>Today Opened: <b>${founderYesNo(summary.todayOpened)}</b></span>
+        <span>Today Tracked: <b>${founderYesNo(summary.todayTracked)}</b></span>
+        <span>Today Friction Logged: <b>${founderYesNo(summary.todayFrictionLogged)}</b></span>
+      </div>
+
+      <div class="founder-actions">
+        <button class="btn cyan" type="button" data-action="toggle-founder-bug-form">Add Bug Found</button>
+        <button class="btn ghost" type="button" data-action="toggle-founder-fix-form">Mark Bug Fixed</button>
+        <button class="btn ghost" type="button" data-action="toggle-founder-friction-form">Log Today's Friction</button>
+      </div>
+
+      ${founderMetricsUi.bugFormOpen ? `
+        <div class="founder-form">
+          <label>Title <input id="founderBugTitle" type="text" maxlength="120" placeholder="Short bug title"></label>
+          <label>Description <textarea id="founderBugDescription" placeholder="What broke"></textarea></label>
+          <div class="founder-form__row">
+            <label>Severity <select id="founderBugSeverity">${founderSeverityOptions()}</select></label>
+            <label>Area <select id="founderBugArea">${founderAreaOptions()}</select></label>
+          </div>
+          <div class="founder-form__foot">
+            <button class="btn primary" type="button" data-action="save-founder-bug">Save Bug</button>
+            <button class="btn ghost" type="button" data-action="cancel-founder-forms">Cancel</button>
+          </div>
+        </div>` : ""}
+
+      ${founderMetricsUi.fixFormOpen ? `
+        <div class="founder-form">
+          <label>Unfixed Bug <select id="founderFixBugId">${founderBugOptions()}</select></label>
+          <div class="founder-form__foot">
+            <button class="btn primary" type="button" data-action="save-founder-bug-fixed"${openBugs.length ? "" : " disabled"}>Mark Fixed</button>
+            <button class="btn ghost" type="button" data-action="cancel-founder-forms">Cancel</button>
+          </div>
+        </div>` : ""}
+
+      ${founderMetricsUi.frictionFormOpen ? `
+        <div class="founder-form">
+          <div class="founder-form__row">
+            <label>Score <select id="founderFrictionScore">${frictionOptions}</select></label>
+          </div>
+          <label>Note <textarea id="founderFrictionNote" placeholder="Optional short note">${escapeHTML(todayFriction && todayFriction.note ? todayFriction.note : "")}</textarea></label>
+          <div class="founder-form__foot">
+            <button class="btn primary" type="button" data-action="save-founder-friction">Save Friction</button>
+            <button class="btn ghost" type="button" data-action="cancel-founder-forms">Cancel</button>
+          </div>
+        </div>` : ""}
+
+      <div class="founder-open-bugs">
+        <div class="founder-subtitle">Open Bugs</div>
+        ${founderOpenBugsHTML(metrics)}
+      </div>
+    </div>
+  `;
+}
+
+function closeFounderForms() {
+  founderMetricsUi.bugFormOpen = false;
+  founderMetricsUi.fixFormOpen = false;
+  founderMetricsUi.frictionFormOpen = false;
+}
+
+function saveFounderBugFromForm() {
+  const title = document.getElementById("founderBugTitle");
+  const description = document.getElementById("founderBugDescription");
+  const severity = document.getElementById("founderBugSeverity");
+  const area = document.getElementById("founderBugArea");
+  if (!title || !title.value.trim()) {
+    showToast("Bug title required");
+    if (title) title.focus();
+    return;
+  }
+  const bug = addBugFound({
+    title: title.value,
+    description: description ? description.value : "",
+    severity: severity ? severity.value : "medium",
+    area: area ? area.value : "Other"
+  });
+  if (!bug) {
+    showToast("Bug title required");
+    return;
+  }
+  closeFounderForms();
+  renderFounderMetricsPanel();
+  showToast("Bug logged");
+}
+
+function saveFounderBugFixedFromForm() {
+  const select = document.getElementById("founderFixBugId");
+  if (!select || !select.value) {
+    showToast("No unfixed bug selected");
+    return;
+  }
+  const fixed = markBugFixed(select.value);
+  if (!fixed) {
+    showToast("Bug already fixed");
+    return;
+  }
+  closeFounderForms();
+  renderFounderMetricsPanel();
+  showToast("Bug marked fixed");
+}
+
+function saveFounderFrictionFromForm() {
+  const score = document.getElementById("founderFrictionScore");
+  const note = document.getElementById("founderFrictionNote");
+  logFriction(score ? score.value : 1, note ? note.value : "");
+  closeFounderForms();
+  renderFounderMetricsPanel();
+  showToast("Friction logged");
 }
 
 function renderDailyXPStatus() {
@@ -3809,6 +4711,7 @@ function logDiscipline(disciplineId) {
   renderReadiness();
   renderMetrics();
   renderCommandBrief();
+  renderFounderMetricsPanel();
   renderLivingWorldCard();       // Phase 2.6: keep the Command card in sync
   renderXPLog();
   const spiritual = isSpiritualDiscipline(disc);
@@ -5849,6 +6752,7 @@ function buildLivingWorldBriefSection() {
 function renderAll() {
   renderTrack();
   renderCommandBrief();
+  renderFounderMetricsPanel();
   renderLivingWorldCard(); // Phase 2.6: Living World card in the Command view
   renderIdentity();
   renderMetrics();
@@ -5867,6 +6771,7 @@ function renderAll() {
   renderTasks();
   renderReadiness();
   renderResume();
+  renderEconomicAgency();
   updateViewStatus(); // keep the header status line's live numbers in sync
   els.bootCompound.textContent = `Compound Multiplier: ${compound().toFixed(2)}x`;
 }
@@ -6368,10 +7273,38 @@ document.addEventListener("click", (event) => {
   if (action === "delete-task") deleteTask(actionTarget.dataset.id);
   if (action === "extract-resume") extractResumeSkills();
   if (action === "clear-resume") clearResume();
+  if (action === "toggle-economic-agency-form") toggleEconomicAgencyForm();
+  if (action === "log-economic-agency-event") logEconomicAgencyEventFromForm();
   if (action === "approve-resume") approveResumeSkills();
   if (action === "open-coach-export") openCoachExport();
   if (action === "close-coach-export") closeCoachExport();
   if (action === "copy-coach-export") copyCoachExport();
+  if (action === "toggle-founder-bug-form") {
+    founderMetricsUi.bugFormOpen = !founderMetricsUi.bugFormOpen;
+    founderMetricsUi.fixFormOpen = false;
+    founderMetricsUi.frictionFormOpen = false;
+    renderFounderMetricsPanel();
+  }
+  if (action === "toggle-founder-fix-form") {
+    founderMetricsUi.fixFormOpen = !founderMetricsUi.fixFormOpen;
+    founderMetricsUi.bugFormOpen = false;
+    founderMetricsUi.frictionFormOpen = false;
+    renderFounderMetricsPanel();
+  }
+  if (action === "toggle-founder-friction-form") {
+    founderMetricsUi.frictionFormOpen = !founderMetricsUi.frictionFormOpen;
+    founderMetricsUi.bugFormOpen = false;
+    founderMetricsUi.fixFormOpen = false;
+    renderFounderMetricsPanel();
+  }
+  if (action === "cancel-founder-forms") {
+    closeFounderForms();
+    renderFounderMetricsPanel();
+  }
+  if (action === "save-founder-bug") saveFounderBugFromForm();
+  if (action === "save-founder-bug-fixed") saveFounderBugFixedFromForm();
+  if (action === "save-founder-friction") saveFounderFrictionFromForm();
+  if (action === "export-founder-metrics") exportFounderMetrics();
   // Mobile navigation + skill onboarding
   if (action === "goview") navigateToView(actionTarget.dataset.view);
   if (action === "open-more") openMore();
@@ -6908,6 +7841,7 @@ if (!localStorage.getItem('questContributors')) {
 // real-browser path).
 function runBoot() {
   loadState();
+  logDailyOpen();
   migrateStateForPhase26();      // Phase 2.6: idempotent state migration (must run first)
   scanSystem();                  // Phase 2.6: build today's Nervous System snapshot
   maybeGenerateEveningWitness(); // Phase 2.6: witness + auto-echo if the day was meaningful
@@ -7316,7 +8250,17 @@ if (typeof window !== 'undefined') {
       evaluateRankProgress: () => cloneForTest(evaluateRankProgress(state)),
       canAdvanceRank: () => canAdvanceRank(state),
       localToday,
-      renderAll
+      renderAll,
+      // Doc 13: Economic Agency test surface.
+      logEconomicAgencyEvent,
+      deriveEconomicAgency: (nowMs) => cloneForTest(
+        deriveEconomicAgency(state.economic_agency_events, Number.isFinite(nowMs) ? nowMs : KAIRU_TIME.nowMs())
+      ),
+      clearResume,
+      renderEconomicAgency,
+      economicAgencyEvents: ECONOMIC_AGENCY_EVENTS,
+      economicAgencyTierMultipliers: ECONOMIC_AGENCY_TIER_MULTIPLIERS,
+      economicAgencyLevelThresholds: ECONOMIC_AGENCY_LEVEL_THRESHOLDS
     };
   }
 }

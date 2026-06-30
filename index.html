@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- source: 62d6f40 @ 2026-06-29 22:19 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -252,6 +253,16 @@
 
   </div>
 </div>
+
+      <div class="section" id="founderValidationSection">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Founder Validation Metrics</h3>
+            <p class="section-note">30-day founder-test instrumentation. Raw logs in storage, totals computed on render.</p>
+          </div>
+        </div>
+        <div id="founderMetricsPanel"></div>
+      </div>
 
       <div class="section" id="echoSection">
         <div class="section-head">
@@ -558,6 +569,39 @@
           </div>
           <div id="resumeDrafts" style="margin-top:18px;"></div>
           <div id="resumeSuggestedQuests" style="margin-top:18px;"></div>
+        </div>
+      </div>
+
+      <div class="section" id="economicAgencySection">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">Economic Agency</h3>
+            <p class="section-note">Optional elevation track (Doc 13). Five faculties -- Perception, Packaging, Persuasion, Production, Compounding -- derived from a logged reality-contact event history. Never assigned, never gated.</p>
+          </div>
+          <button class="btn ghost" type="button" data-action="toggle-economic-agency-form">Log Event</button>
+        </div>
+        <div id="economicAgencyBottleneck" style="margin-bottom:14px;"></div>
+        <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));" id="economicAgencyFaculties"></div>
+        <div class="panel" id="economicAgencyForm" hidden style="margin-top:16px;">
+          <label>
+            Event
+            <select id="eaEventKeyInput"></select>
+          </label>
+          <label>
+            Verification
+            <select id="eaTierInput">
+              <option value="SELF_REPORTED">Self-reported</option>
+              <option value="INTEGRATION_VERIFIED">Integration-verified</option>
+              <option value="FINANCIAL_VERIFIED">Financial-verified</option>
+            </select>
+          </label>
+          <label>
+            Evidence (optional)
+            <input type="text" id="eaEvidenceInput" placeholder="Link or note">
+          </label>
+          <div class="modal-foot" style="justify-content:flex-start;margin-top:0;">
+            <button class="btn primary" type="button" data-action="log-economic-agency-event">Log Event</button>
+          </div>
         </div>
       </div>
     </section>
