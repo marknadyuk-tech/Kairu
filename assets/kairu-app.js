@@ -8015,6 +8015,10 @@ function assembleAIContext() {
   // --- META ---
   const meta = {
     contextVersion: CONTEXT_SCHEMA_VERSION,
+    // Every DirectiveObject carries this id — the trace from a directive back to
+    // the exact context snapshot that produced it. Additive field; consumers of
+    // the pre-existing meta shape are unaffected.
+    contextSnapshotId: createId('ctx'),
     assembledAt: now.toISOString(),
     playerId: sovereignName,
     sovereignName,
@@ -8195,36 +8199,146 @@ function classifyQuery(userInput) {
   return 'analytical'; // default to analytical when ambiguous
 }
 
+/* ----------------------------------------------------------------------------
+   DIRECTIVE LAYER (schema v1.0 — owner-locked 2026-07-01)
+   Two object shapes, deliberately distinct: DirectiveObject is what each
+   hemisphere emits; ArbitrationResult is what comparing two of them produces.
+   Field naming is camelCase per the owner's explicit lock for these two
+   schemas (matches totalXP/daysTracked-era state keys; noted as a deviation
+   from the §17/§18 snake_case trend for new persisted schemas).
+   Nothing here writes storage — pure construction and comparison, same as the
+   rest of the Phase 3 skeleton.
+   ------------------------------------------------------------------------- */
+
+const DIRECTIVE_SCHEMA_VERSION = '1.0';
+const ARBITRATION_SCHEMA_VERSION = '1.0';
+const ARBITRATION_CONFIDENCE_FLOOR = 0.5;
+
+const DIRECTIVE_SOURCES = ['LEFT_BRAIN', 'RIGHT_BRAIN'];
+// Top-level life areas only. Economic Agency's five-faculty breakdown stays
+// inside that engine — arbitration only needs "same broad area or not".
+const DIRECTIVE_DOMAINS = ['DISCIPLINE', 'INCOME', 'SKILL', 'SPIRITUAL',
+                           'ECONOMIC_AGENCY', 'QUEST', 'GENERAL'];
+const DIRECTIVE_POLARITIES = ['PUSH', 'HOLD', 'MAINTAIN'];
+
+// Single factory for every DirectiveObject, V1 stubs and Phase 3 live parses
+// alike (§7: same function, no refactor). Throws on bad source/polarity —
+// those are integration errors, not player data, and must fail loudly.
+function createDirective(fields) {
+  const f = fields || {};
+  if (!DIRECTIVE_SOURCES.includes(f.source)) {
+    throw new TypeError(`createDirective: invalid source "${f.source}"`);
+  }
+  if (!DIRECTIVE_POLARITIES.includes(f.polarity)) {
+    throw new TypeError(`createDirective: invalid polarity "${f.polarity}"`);
+  }
+  return {
+    schemaVersion: DIRECTIVE_SCHEMA_VERSION,
+    source: f.source,
+    domain: DIRECTIVE_DOMAINS.includes(f.domain) ? f.domain : 'GENERAL',
+    polarity: f.polarity,
+    confidence: Math.max(0, Math.min(1, Number(f.confidence) || 0)),
+    directiveText: String(f.directiveText || ''),
+    reasoningSummary: String(f.reasoningSummary || ''), // transparency clause — always present
+    initiatedBy: (f.initiatedBy === 'KAIRU' || f.initiatedBy === 'PLAYER') ? f.initiatedBy : null,
+    contextSnapshotId: f.contextSnapshotId || null,
+    createdAt: KAIRU_TIME.iso()
+  };
+}
+
 // Left hemisphere (analytical). STUB — Phase 3 routes to Gemini with context
-// injection. Returns: { hemisphere, response, confidence, tokensUsed }.
+// injection. Emits a DirectiveObject.
 async function callLeftBrain(context, userInput) {
   console.log('[KAIRU] callLeftBrain stub called. Phase 3 will route to Gemini.');
-  return {
-    hemisphere: 'left',
-    response: '[Left brain stub — Gemini integration pending Phase 3]',
+  return createDirective({
+    source: 'LEFT_BRAIN',
+    domain: 'GENERAL',
+    polarity: 'MAINTAIN',
     confidence: 0,
-    tokensUsed: 0
-  };
+    directiveText: '[Left brain stub — Gemini integration pending Phase 3]',
+    reasoningSummary: 'Stub — no live model call was made.',
+    initiatedBy: 'PLAYER',
+    contextSnapshotId: (context && context.meta && context.meta.contextSnapshotId) || null
+  });
 }
 
 // Right hemisphere (psychological). STUB — Phase 3 routes to the Anthropic API
-// with context injection. Returns: { hemisphere, response, confidence, tokensUsed }.
+// with context injection. Emits a DirectiveObject.
 async function callRightBrain(context, userInput) {
   console.log('[KAIRU] callRightBrain stub called. Phase 3 will route to Claude API.');
-  return {
-    hemisphere: 'right',
-    response: '[Right brain stub — Claude API integration pending Phase 3]',
+  return createDirective({
+    source: 'RIGHT_BRAIN',
+    domain: 'GENERAL',
+    polarity: 'MAINTAIN',
     confidence: 0,
-    tokensUsed: 0
+    directiveText: '[Right brain stub — Claude API integration pending Phase 3]',
+    reasoningSummary: 'Stub — no live model call was made.',
+    initiatedBy: 'PLAYER',
+    contextSnapshotId: (context && context.meta && context.meta.contextSnapshotId) || null
+  });
+}
+
+// Opposition is PUSH vs HOLD only. MAINTAIN is steady-state — disagreeing
+// with it is a caveat, not a crossroads worth interrupting the player for.
+function polarityOpposes(polarityA, polarityB) {
+  return (polarityA === 'PUSH' && polarityB === 'HOLD') ||
+         (polarityA === 'HOLD' && polarityB === 'PUSH');
+}
+
+// DESIGN GATE RESOLVED (owner directive, 2026-07-01 — supersedes the parked
+// left-wins default): PASS_THROUGH if domains differ; CROSSROADS if domains
+// match, polarity opposes, and both confidences clear the floor; CAVEAT
+// otherwise. Both input directives are retained verbatim, never mutated,
+// never discarded. resolvedDirective for PASS_THROUGH/CAVEAT is the
+// higher-confidence directive (tie → directiveA, preserving the old
+// left-first ordering). CROSSROADS resolves only via resolveCrossroads().
+function arbitrate(directiveA, directiveB) {
+  const domainsMatch = directiveA.domain === directiveB.domain;
+  const bothConfident =
+    directiveA.confidence >= ARBITRATION_CONFIDENCE_FLOOR &&
+    directiveB.confidence >= ARBITRATION_CONFIDENCE_FLOOR;
+
+  let resultType;
+  if (!domainsMatch) {
+    resultType = 'PASS_THROUGH';
+  } else if (polarityOpposes(directiveA.polarity, directiveB.polarity) && bothConfident) {
+    resultType = 'CROSSROADS';
+  } else {
+    resultType = 'CAVEAT';
+  }
+
+  const isCrossroads = resultType === 'CROSSROADS';
+  const winner = directiveB.confidence > directiveA.confidence ? directiveB : directiveA;
+  const now = KAIRU_TIME.iso();
+
+  return {
+    schemaVersion: ARBITRATION_SCHEMA_VERSION,
+    resultType,
+    directives: [directiveA, directiveB],
+    resolvedDirective: isCrossroads ? null : winner,
+    confidenceFloorApplied: ARBITRATION_CONFIDENCE_FLOOR, // logged so past results stay legible if the floor moves
+    playerChoice: null,
+    resolvedAt: isCrossroads ? null : now,
+    createdAt: now
   };
 }
 
-// DESIGN GATE (unresolved — see spec §09). Conflict-resolution rule for
-// bicameral outputs is parked. Default behavior: left brain wins. Do NOT build
-// arbitration logic until the gate is answered in Phase 3.
-function arbitrate(leftResponse, rightResponse) {
-  console.warn('[KAIRU] arbitrate() called with default left-wins rule. Design gate unresolved.');
-  return leftResponse;
+// A CROSSROADS resolves only by explicit player choice. Returns a NEW
+// ArbitrationResult (additive-event style — the unresolved record is not
+// overwritten in place).
+function resolveCrossroads(arbitrationResult, playerChoice) {
+  if (arbitrationResult.resultType !== 'CROSSROADS' || arbitrationResult.playerChoice !== null) {
+    throw new TypeError('resolveCrossroads: result is not an unresolved CROSSROADS');
+  }
+  if (playerChoice !== 'A' && playerChoice !== 'B') {
+    throw new TypeError(`resolveCrossroads: invalid playerChoice "${playerChoice}"`);
+  }
+  return {
+    ...arbitrationResult,
+    resolvedDirective: arbitrationResult.directives[playerChoice === 'A' ? 0 : 1],
+    playerChoice,
+    resolvedAt: KAIRU_TIME.iso()
+  };
 }
 
 // Single entry point for all AI queries: assemble context, classify, route, return.
@@ -8250,12 +8364,19 @@ async function queryKAIRU(userInput) {
   }
 
   if (classification === 'bicameral') {
-    const [leftResponse, rightResponse] = await Promise.all([
+    const [leftDirective, rightDirective] = await Promise.all([
       callLeftBrain(context, userInput),
       callRightBrain(context, userInput)
     ]);
-    const response = arbitrate(leftResponse, rightResponse);
-    return { context, response, bothHemispheres: { left: leftResponse, right: rightResponse } };
+    // response is the resolved directive — null on CROSSROADS, where the
+    // player must choose via resolveCrossroads() before anything is surfaced.
+    const arbitration = arbitrate(leftDirective, rightDirective);
+    return {
+      context,
+      response: arbitration.resolvedDirective,
+      arbitration,
+      bothHemispheres: { left: leftDirective, right: rightDirective }
+    };
   }
 
   // Fallback
@@ -8273,6 +8394,9 @@ if (typeof window !== 'undefined') {
   window.KAIRU.assembleContext = assembleAIContext;
   window.KAIRU.classifyQuery = classifyQuery;
   window.KAIRU.queryKAIRU = queryKAIRU;
+  window.KAIRU.createDirective = createDirective;
+  window.KAIRU.arbitrate = arbitrate;
+  window.KAIRU.resolveCrossroads = resolveCrossroads;
 
   if (KAIRU_TIME.isTestMode()) {
     const cloneForTest = (value) => {
