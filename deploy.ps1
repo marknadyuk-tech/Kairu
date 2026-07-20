@@ -23,8 +23,9 @@ if ($localHead -ne $remoteHead) {
 
 Copy-Item "$src\KAIRU v2.5.html"     "$dst\index.html"          -Force
 Copy-Item "$src\kairu-logo.png"      "$dst\kairu-logo.png"      -Force
-Copy-Item "$src\assets\kairu-app.js" "$dst\assets\kairu-app.js" -Force
-Copy-Item "$src\assets\kairu.css"    "$dst\assets\kairu.css"    -Force
+Copy-Item "$src\assets\kairu-app.js"    "$dst\assets\kairu-app.js"    -Force
+Copy-Item "$src\assets\kairu.css"       "$dst\assets\kairu.css"       -Force
+Copy-Item "$src\assets\skill-graph.js"  "$dst\assets\skill-graph.js"  -Force
 New-Item -ItemType Directory -Force -Path "$dst\data\skill-graph" | Out-Null
 Copy-Item "$src\data\skill-graph\skill_render_manifest.json" "$dst\data\skill-graph\skill_render_manifest.json" -Force
 Copy-Item "$src\data\skill-graph\skill_nodes.json" "$dst\data\skill-graph\skill_nodes.json" -Force
