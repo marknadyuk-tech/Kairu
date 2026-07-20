@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- source: 86b82d3 @ 2026-07-01 23:40 -->
+<!-- source: 28240cd-dirty @ 2026-07-19 18:29 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -84,7 +84,7 @@
           <span class="brand__rank-boost" id="brandRankBoost" hidden>&#9650; +3%</span>
         </div>
       </div>
-      <div class="brand__sub" id="brandSub">PHASE 2.5.1 // COMMAND</div>
+      <div class="brand__sub" id="brandSub">PHASE 2.6 // COMMAND</div>
     </div>
 
     <nav class="nav">
@@ -135,6 +135,13 @@
         <span class="tab__text">
           <span class="tab__label">Financial</span>
           <span class="tab__hint">Net position</span>
+        </span>
+      </button>
+      <button class="tab" type="button" data-view="sovereignty">
+        <span class="tab__icon">07</span>
+        <span class="tab__text">
+          <span class="tab__label">Sovereignty</span>
+          <span class="tab__hint">Security & Data</span>
         </span>
       </button>
     </nav>
@@ -227,6 +234,8 @@
           </article>
         </div>
       </div>
+
+      <div class="section privacy-status-section" id="privacyStatusCard"></div>
 
       <div class="section" id="commandBriefSection">
   <div class="section-head">
@@ -606,6 +615,21 @@
       </div>
     </section>
 
+    <section class="view" id="worldTree" aria-label="World Tree">
+      <div class="section">
+        <div class="section-head">
+          <div>
+            <h3 class="section-title">World Tree</h3>
+            <p class="section-note">Explore the shared taxonomy of capabilities across nine distinct trunks.</p>
+          </div>
+          <label class="world-tree-search">
+            <input id="worldTreeSearch" type="search" aria-label="Search World Tree nodes" placeholder="Search 17,587 nodes…" autocomplete="off">
+          </label>
+        </div>
+        <div id="worldTreeList" aria-live="polite"></div>
+      </div>
+    </section>
+
     <section class="view" id="tasks" aria-label="Task board">
       <div class="section">
         <div class="section-head">
@@ -625,6 +649,10 @@
         </div>
         <div id="taskDoneList" class="task-stack"></div>
       </div>
+    </section>
+
+    <section class="view" id="sovereignty" aria-label="Security and Data sovereignty">
+      <div id="sovereigntyHub"></div>
     </section>
 
     <p class="system-note">KAIRU // Codex UIUX Remix // LocalStorage Persistence Live</p>
@@ -660,7 +688,9 @@
       <button class="more-sheet__link" type="button" data-action="goview" data-view="tasks"><b>Tasks</b><span>Maintenance</span></button>
       <button class="more-sheet__link" type="button" data-action="goview" data-view="pipeline"><b>Pipeline</b><span>Opportunity tracker</span></button>
       <button class="more-sheet__link" type="button" data-action="goview" data-view="financial"><b>Financial</b><span>Net position</span></button>
+      <button class="more-sheet__link" type="button" data-action="goview" data-view="sovereignty"><b>Sovereignty</b><span>Security & Data</span></button>
       <button class="more-sheet__link" type="button" data-action="goview" data-view="archive"><b>Chronicle</b><span>Deep history</span></button>
+      <button class="more-sheet__link" type="button" data-action="goview" data-view="worldtree"><b>World Tree</b><span>Capability atlas</span></button>
     </div>
     <div class="more-sheet__utils">
       <button class="btn ghost" type="button" data-action="export-backup">Export Backup</button>
@@ -1172,8 +1202,15 @@
   </div>
 </div>
 
+<div class="modal-bg world-tree-detail-bg" id="worldTreeDetailModal" role="dialog" aria-modal="true" aria-labelledby="worldTreeDetailTitle">
+  <div class="modal world-tree-detail">
+    <div id="worldTreeDetailContent"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="assets/kairu-app.js"></script>
+<script src="assets/skill-graph.js"></script>
 </body>
 </html>

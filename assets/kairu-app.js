@@ -521,7 +521,7 @@ function attemptAscend() {
 
 // Concise, actionable titles. The descriptive copy is now a live status line
 // (see viewStatusHTML) so the header surfaces numbers, not restated labels.
-// Header subtitle: "PHASE 2.5.1 // <PAGE>", kept in sync by setView. Short page
+// Header subtitle: "PHASE 2.6 // <PAGE>", kept in sync by setView. Short page
 // names so the line stays compact on mobile (not "COMMAND CENTER").
 const PHASE_LABEL = "PHASE 2.6";
 const DEFAULT_VIEW = "command";
@@ -533,13 +533,16 @@ const VALID_VIEWS = [
   "tasks",
   "pipeline",
   "financial",
+  "sovereignty",
+  "worldtree",
   "chronicle"
 ];
 const VIEW_ALIASES = {
   archive: "chronicle"
 };
 const VIEW_DOM_IDS = {
-  chronicle: "archive"
+  chronicle: "archive",
+  worldtree: "worldTree"
 };
 const PAGE_SHORT_NAMES = {
   command: "Command",
@@ -549,6 +552,8 @@ const PAGE_SHORT_NAMES = {
   tasks: "Tasks",
   pipeline: "Pipeline",
   financial: "Financial",
+  sovereignty: "Sovereignty",
+  worldTree: "World Tree",
   archive: "Chronicle"
 };
 
@@ -558,6 +563,8 @@ const copy = {
   archive:   { eyebrow: "KAIRU Chronicle",     title: "Chronicle" },
   skills:    { eyebrow: "Skill Registry",      title: "Skills" },
   financial: { eyebrow: "Financial Inventory", title: "Financial" },
+  sovereignty: { eyebrow: "Security & Data", title: "Sovereignty" },
+  worldTree: { eyebrow: "Capability Atlas", title: "World Tree" },
   pipeline:  { eyebrow: "Income & Opportunity", title: "Pipeline" },
   discipline:{ eyebrow: "Discipline Stack",    title: "Discipline" },
   tasks:     { eyebrow: "Maintenance Layer",   title: "Tasks" }
@@ -585,6 +592,7 @@ function viewStatusHTML(view) {
     case 'pipeline':  return escapeHTML(plural((state.jobPipeline || []).length, 'opportunity', 'opportunities') + ' tracked');
     case 'tasks':     return escapeHTML(plural((state.tasks || []).filter(t => !t.done && !t.completed).length, 'open task'));
     case 'financial': return escapeHTML(formatMoney((state.financials.assets || 0) - (state.financials.liabilities || 0)) + ' net worth');
+    case 'sovereignty': return escapeHTML('Private by default');
     case 'archive':   return escapeHTML(plural((state.archivedQuests || []).length, 'quest') + ' chronicled');
     default:          return '';
   }
@@ -1363,6 +1371,10 @@ const els = {
   identityTier: $("#identityTier"),
   identityFaith: $("#identityFaith"),
   skillsList: $("#skillsList"),
+  worldTreeList: $("#worldTreeList"),
+  worldTreeSearch: $("#worldTreeSearch"),
+  worldTreeDetailModal: $("#worldTreeDetailModal"),
+  worldTreeDetailContent: $("#worldTreeDetailContent"),
   identityModal: $("#identityModal"),
   editName: $("#editName"),
   editArchetype: $("#editArchetype"),
@@ -2311,7 +2323,7 @@ function navigateToView(viewId, options = { push: true }) {
     els.viewTitle.textContent = nextCopy.title;
   }
 
-  // Dynamic header subtitle: PHASE 2.5.1 // CURRENT PAGE (uppercased via CSS).
+  // Dynamic header subtitle: PHASE 2.6 // CURRENT PAGE (uppercased via CSS).
   const subEl = document.getElementById("brandSub");
   if (subEl) {
     const pageName = PAGE_SHORT_NAMES[domView] || (nextCopy && nextCopy.title) || routeView;
@@ -2332,6 +2344,10 @@ function navigateToView(viewId, options = { push: true }) {
   // Bring the freshly shown view into focus on mobile (content scrolls under header).
   const mainEl = document.querySelector(".main");
   if (mainEl) mainEl.scrollTo({ top: 0, behavior: "auto" });
+
+  if (routeView === "worldtree") {
+    window.setTimeout(ensureWorldTreeLoaded, 0);
+  }
 }
 
 function setView(view, options = { push: true }) {
@@ -6799,7 +6815,276 @@ function buildLivingWorldBriefSection() {
   ].join('\n');
 }
 
+/* ===================== TRUST UI V0.1 // SOVEREIGNTY SCAFFOLD =====================
+   Render-only data policy surfaces. These helpers do not persist visibility
+   permissions, do not connect external services, and do not alter progression,
+   archives, Echoes, Namebind, financials, storage adapters, or XP math. */
+const VISIBILITY_LEVELS = [
+  {
+    name: "Private",
+    state: "Default",
+    copy: "Visible only to you. KAIRU starts here and stays here unless you choose otherwise."
+  },
+  {
+    name: "Party",
+    state: "Future",
+    copy: "For explicitly chosen trusted collaborators or future party members."
+  },
+  {
+    name: "Commons",
+    state: "Future",
+    copy: "For limited, anonymized, community-benefit contexts only after consent."
+  },
+  {
+    name: "Public",
+    state: "Future",
+    copy: "For future public-facing surfaces only after explicit opt-in."
+  }
+];
+
+const LOCKED_SOVEREIGNTY_DOMAINS = [
+  "Finances",
+  "Health",
+  "Spiritual framework",
+  "Vault/private identity records",
+  "Sensitive Echoes",
+  "Raw personal notes"
+];
+
+const CONFIGURABLE_SOVEREIGNTY_DOMAINS = [
+  "Active quests",
+  "Completed quests and accolades",
+  "Skills",
+  "Achievements",
+  "General progress summaries",
+  "Non-sensitive public milestones"
+];
+
+const NODE_PLACEHOLDERS = [
+  {
+    name: "Trusted Party Node",
+    copy: "Future trusted collaborators. No access in this build."
+  },
+  {
+    name: "Service Node",
+    copy: "Future external services or integrations. No live data is shared."
+  },
+  {
+    name: "Organization Node",
+    copy: "Future teams or organizations. Locked domains stay locked."
+  }
+];
+
+const B_RANK_DISCLOSURE_TIERS = ["B", "A", "S", "SS", "SSS"];
+
+function safeStorageRead(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getStorageStatusText() {
+  if (state && typeof state === "object") return "Local app state detected";
+  return "Secure sync not active";
+}
+
+function getAIMemoryStatusText() {
+  const namebindActive = safeStorageRead("kairu_namebind_active") === "true";
+  const echoCount = Array.isArray(state.echoes) ? state.echoes.length : 0;
+  if (namebindActive) return `Namebind active // ${echoCount} local Echo${echoCount === 1 ? "" : "es"}`;
+  if (echoCount > 0) return `${echoCount} local Echo${echoCount === 1 ? "" : "es"} // coach export is manual`;
+  return "Local memory available // live AI sharing off";
+}
+
+function getCoachPermissionText() {
+  const permission = safeStorageRead("kairu_namebind_coach_permission") || "passive";
+  return permission === "challenge_enabled"
+    ? "Challenge mode authorized after Namebind"
+    : "Observer mode";
+}
+
+function isBRankDisclosureEligible() {
+  const tier = String((state.identity && state.identity.tier) || "E").toUpperCase();
+  return B_RANK_DISCLOSURE_TIERS.includes(tier);
+}
+
+function trustStatusTile(label, value, detail, extraClass = "") {
+  return `
+    <div class="trust-status-tile ${extraClass}">
+      <span>${escapeHTML(label)}</span>
+      <b>${escapeHTML(value)}</b>
+      <small>${escapeHTML(detail)}</small>
+    </div>`;
+}
+
+function renderPrivacyStatusCard() {
+  const container = document.getElementById("privacyStatusCard");
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="section-head trust-head">
+      <div>
+        <h3 class="section-title">Sovereignty Status</h3>
+        <p class="section-note">Private by default. Nothing is shared unless you choose it.</p>
+      </div>
+      <button class="btn ghost" type="button" data-action="goview" data-view="sovereignty">Security & Data</button>
+    </div>
+    <div class="trust-status-grid">
+      ${trustStatusTile("Current mode", "Private", "Default for every domain", "is-private")}
+      ${trustStatusTile("Storage", getStorageStatusText(), "Secure sync not active")}
+      ${trustStatusTile("AI memory", getAIMemoryStatusText(), getCoachPermissionText())}
+      ${trustStatusTile("Financial data", "Manual", "No bank connection is active")}
+      ${trustStatusTile("External connections", "None active", "Nodes and integrations are off")}
+    </div>`;
+}
+
+function visibilityLevelHTML(level) {
+  return `
+    <article class="sovereignty-card visibility-card ${level.name === "Private" ? "is-current" : ""}">
+      <div class="sovereignty-card__top">
+        <h4>${escapeHTML(level.name)}</h4>
+        <span class="trust-pill">${escapeHTML(level.state)}</span>
+      </div>
+      <p>${escapeHTML(level.copy)}</p>
+    </article>`;
+}
+
+function domainPillHTML(name, locked = false) {
+  return `<span class="domain-pill ${locked ? "locked" : ""}">${locked ? "Locked // " : "Private // "}${escapeHTML(name)}</span>`;
+}
+
+function nodeCardHTML(node) {
+  return `
+    <article class="node-card">
+      <div>
+        <h4>${escapeHTML(node.name)}</h4>
+        <p>${escapeHTML(node.copy)}</p>
+      </div>
+      <span class="trust-pill inactive">Inactive</span>
+    </article>`;
+}
+
+function bRankDisclosureHTML() {
+  const eligible = isBRankDisclosureEligible();
+  return `
+    <div class="sovereignty-panel b-rank-panel ${eligible ? "is-eligible" : ""}">
+      <div class="sovereignty-panel__copy">
+        <span class="trust-pill">${eligible ? "Eligible placeholder" : "Future gate"}</span>
+        <h3>B-rank Visibility Disclosure</h3>
+        <p>${eligible
+          ? "B-rank may make broader visibility features available later. Nothing becomes public automatically."
+          : "At B-rank, KAIRU may offer broader visibility features. This is a read-only placeholder for now."}</p>
+        <p>Any future visibility must be chosen explicitly. Locked domains stay locked. Financial, health, spiritual, and vault/private domains are never exposed by default.</p>
+      </div>
+    </div>`;
+}
+
+function renderSovereignty() {
+  const container = document.getElementById("sovereigntyHub");
+  if (!container) return;
+
+  const lockedDomains = LOCKED_SOVEREIGNTY_DOMAINS.map((name) => domainPillHTML(name, true)).join("");
+  const configurableDomains = CONFIGURABLE_SOVEREIGNTY_DOMAINS.map((name) => domainPillHTML(name, false)).join("");
+  const visibilityCards = VISIBILITY_LEVELS.map(visibilityLevelHTML).join("");
+  const nodeCards = NODE_PLACEHOLDERS.map(nodeCardHTML).join("");
+
+  container.innerHTML = `
+    <div class="section sovereignty-hero">
+      <div class="sovereignty-hero__copy">
+        <span class="trust-pill">Your Sovereignty Rules</span>
+        <h3>Private by default.</h3>
+        <p>Your KAIRU data stays yours. Export anytime. Reset anytime. Secure sync and external connections are off unless a future version asks for clear permission.</p>
+      </div>
+      <div class="sovereignty-hero__status">
+        ${trustStatusTile("Mode", "Private", "Default state")}
+        ${trustStatusTile("Storage", getStorageStatusText(), "Secure sync not active")}
+        ${trustStatusTile("Financials", "Manual entry", "Bank sync not connected")}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <div>
+          <h3 class="section-title">Visibility Model</h3>
+          <p class="section-note">Explanatory only in V0.1. No global sharing permissions are stored.</p>
+        </div>
+      </div>
+      <div class="visibility-grid">${visibilityCards}</div>
+    </div>
+
+    <div class="section sovereignty-grid">
+      <div class="sovereignty-panel">
+        <span class="trust-pill locked">Locked</span>
+        <h3>Locked Domains</h3>
+        <p>Locked domains are non-shareable in V0.1. Nodes cannot access them by default.</p>
+        <div class="domain-list">${lockedDomains}</div>
+      </div>
+      <div class="sovereignty-panel">
+        <span class="trust-pill">Private</span>
+        <h3>Future-configurable Domains</h3>
+        <p>These domains may support explicit visibility choices later. Today, they remain Private.</p>
+        <div class="domain-list">${configurableDomains}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <div>
+          <h3 class="section-title">Node Connections Ledger</h3>
+          <p class="section-note">No active Nodes. External connections are off.</p>
+        </div>
+      </div>
+      <div class="node-ledger">
+        <div class="node-ledger__empty">
+          <b>No active Nodes</b>
+          <span>Future Nodes must show what they can see. No Node receives live data in this build.</span>
+        </div>
+        <div class="node-grid">${nodeCards}</div>
+      </div>
+    </div>
+
+    <div class="section sovereignty-grid">
+      <div class="sovereignty-panel">
+        <span class="trust-pill">AI Memory</span>
+        <h3>AI Memory Controls</h3>
+        <p>${escapeHTML(getAIMemoryStatusText())}</p>
+        <p>${escapeHTML(getCoachPermissionText())}. Coach briefs are manual exports. Live third-party AI sharing is not active.</p>
+      </div>
+      <div class="sovereignty-panel">
+        <span class="trust-pill">Manual</span>
+        <h3>Financial Data</h3>
+        <p>Financials are manual in this version. No bank connection is active. Plaid is not connected.</p>
+        <button class="btn ghost" type="button" data-action="open-fin">Edit Manual Financials</button>
+      </div>
+    </div>
+
+    ${bRankDisclosureHTML()}
+
+    <div class="section sovereignty-grid">
+      <div class="sovereignty-panel">
+        <span class="trust-pill">Portability</span>
+        <h3>Export / Import / Reset</h3>
+        <p>Export a backup whenever you want. Import replaces the current local KAIRU data only after confirmation. Reset remains available when you choose it.</p>
+        <div class="trust-action-row">
+          <button class="btn ghost" type="button" data-action="export-backup">Export Backup</button>
+          <button class="btn ghost" type="button" data-action="import-backup">Import Backup</button>
+          <button class="btn ghost danger" type="button" data-action="reset">Reset State</button>
+        </div>
+      </div>
+      <div class="sovereignty-panel">
+        <span class="trust-pill">Redaction Principle</span>
+        <h3>Sensitive Content</h3>
+        <p>Integrity matters, but sovereignty comes first. Future sensitive redactions should remove the sensitive content and leave only a non-sensitive tombstone.</p>
+        <p class="tombstone-example">Entry deleted by user on YYYY-MM-DD.</p>
+      </div>
+    </div>`;
+}
+
 function renderAll() {
+  renderPrivacyStatusCard();
+  renderSovereignty();
   renderTrack();
   renderCommandBrief();
   renderFounderMetricsPanel();
@@ -6813,6 +7098,7 @@ function renderAll() {
   renderPipeline();
   renderDisciplines();
   renderSkills();
+  renderWorldTree();
   renderSanctuary();
   renderSerendipity();
   renderXPLog();
@@ -6824,6 +7110,283 @@ function renderAll() {
   renderEconomicAgency();
   updateViewStatus(); // keep the header status line's live numbers in sync
   els.bootCompound.textContent = `Compound Multiplier: ${compound().toFixed(2)}x`;
+}
+
+function renderWorldTree() {
+  if (!els.worldTreeList || els.worldTreeList.childElementCount > 0) return;
+  els.worldTreeList.innerHTML = '<div class="empty">Growing the World Tree…</div>';
+}
+
+const TRUNK_CONFIG = {
+  "Craft":               { label: "Craft",               color: "var(--green)",  soft: "var(--green-soft)",  glow: "var(--green-glow)" },
+  "Stewardship":         { label: "Stewardship",         color: "var(--cyan)",   soft: "var(--cyan-soft)",   glow: "var(--cyan-glow)" },
+  "Communication":       { label: "Communication",       color: "var(--indigo)", soft: "var(--indigo-soft)", glow: "var(--indigo-glow)" },
+  "Enterprise":          { label: "Enterprise",          color: "var(--amber)",  soft: "var(--amber-soft)",  glow: "var(--amber-glow)" },
+  "Cognition":           { label: "Cognition",           color: "var(--violet)", soft: "var(--violet-soft)", glow: "var(--violet-glow)" },
+  "Occupation Pathways": { label: "Occupation Pathways", color: "var(--slate)",  soft: "var(--slate-soft)",  glow: "var(--slate-glow)" },
+  "Leadership":          { label: "Leadership",          color: "var(--rose)",   soft: "var(--rose-soft)",   glow: "var(--rose-glow)" },
+  "Character":           { label: "Character",           color: "var(--gold)",   soft: "var(--gold-soft)",   glow: "var(--gold-glow)" },
+  "Physicality":         { label: "Physicality",         color: "var(--red)",    soft: "var(--red-soft)",    glow: "var(--red-glow)" }
+};
+
+const WORLD_TREE_RENDER_PAGE = 100;
+let worldTreeManifest = null;
+let worldTreeLoadPromise = null;
+let worldTreeActiveTrunk = null;
+let worldTreeRenderLimit = WORLD_TREE_RENDER_PAGE;
+let worldTreeManifestById = new Map();
+let worldTreeFullGraph = null;
+let worldTreeFullGraphPromise = null;
+let worldTreeDetailNodeId = null;
+let worldTreeParentLimit = 25;
+let worldTreeChildLimit = 25;
+let worldTreeSearchQuery = "";
+let worldTreeSearchLimit = WORLD_TREE_RENDER_PAGE;
+
+function ensureWorldTreeLoaded(afterScriptLoad = false) {
+  if (!els.worldTreeList) return Promise.resolve(null);
+  if (worldTreeManifest) {
+    if (worldTreeSearchQuery) renderWorldTreeSearchResults();
+    else renderWorldTreeOverview();
+    return Promise.resolve(worldTreeManifest);
+  }
+  if (worldTreeLoadPromise) return worldTreeLoadPromise;
+
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.loadWorldTreeManifest !== "function") {
+    if (!afterScriptLoad) {
+      window.setTimeout(() => ensureWorldTreeLoaded(true), 0);
+    } else {
+      els.worldTreeList.innerHTML = '<div class="empty">The World Tree loader is unavailable.</div>';
+    }
+    return Promise.resolve(null);
+  }
+
+  els.worldTreeList.innerHTML = '<div class="empty">Growing the World Tree…</div>';
+  worldTreeLoadPromise = graphApi.loadWorldTreeManifest()
+    .then((manifest) => {
+      worldTreeManifest = manifest;
+      worldTreeManifestById = new Map(manifest.map((node) => [node.id, node]));
+      if (worldTreeSearchQuery) renderWorldTreeSearchResults();
+      else renderWorldTreeOverview();
+      return manifest;
+    })
+    .catch((error) => {
+      worldTreeLoadPromise = null;
+      els.worldTreeList.innerHTML = `
+        <div class="empty">
+          <span>The World Tree could not be reached.</span>
+          <button class="btn ghost" type="button" data-action="world-tree-retry">Try again</button>
+        </div>`;
+      console.error("World Tree manifest load failed", error);
+      return null;
+    });
+  return worldTreeLoadPromise;
+}
+
+function renderWorldTreeOverview() {
+  if (!els.worldTreeList || !worldTreeManifest) return;
+  worldTreeActiveTrunk = null;
+  const total = worldTreeManifest.length;
+  const counts = worldTreeManifest.reduce((byTrunk, node) => {
+    byTrunk[node.trunkCategory] = (byTrunk[node.trunkCategory] || 0) + 1;
+    return byTrunk;
+  }, {});
+
+  els.worldTreeList.innerHTML = `<div class="world-tree-trunks">${
+    Object.entries(TRUNK_CONFIG).map(([trunkName, config]) => {
+      const count = counts[trunkName] || 0;
+      const percentage = total ? ((count / total) * 100).toFixed(1) : "0.0";
+      return `
+        <button class="world-tree-trunk" type="button"
+          data-action="world-tree-open-trunk" data-trunk="${escapeHTML(trunkName)}"
+          style="--trunk-color:${config.color};--trunk-soft:${config.soft};--trunk-glow:${config.glow};">
+          <span class="world-tree-trunk__swatch" aria-hidden="true"></span>
+          <span class="world-tree-trunk__name">${escapeHTML(config.label)}</span>
+          <span class="world-tree-trunk__meta">${count.toLocaleString()} nodes · ${percentage}% of the tree</span>
+        </button>`;
+    }).join("")
+  }</div>`;
+}
+
+function openWorldTreeTrunk(trunkName) {
+  if (!worldTreeManifest || !TRUNK_CONFIG[trunkName]) return;
+  worldTreeSearchQuery = "";
+  if (els.worldTreeSearch) els.worldTreeSearch.value = "";
+  worldTreeActiveTrunk = trunkName;
+  worldTreeRenderLimit = WORLD_TREE_RENDER_PAGE;
+  renderWorldTreeTrunk();
+}
+
+function showWorldTreeOverview() {
+  worldTreeSearchQuery = "";
+  worldTreeSearchLimit = WORLD_TREE_RENDER_PAGE;
+  if (els.worldTreeSearch) els.worldTreeSearch.value = "";
+  renderWorldTreeOverview();
+}
+
+function renderWorldTreeSearchResults() {
+  if (!els.worldTreeList || !worldTreeManifest) return;
+  const query = worldTreeSearchQuery.trim().toLowerCase();
+  if (!query) {
+    renderWorldTreeOverview();
+    return;
+  }
+
+  worldTreeActiveTrunk = null;
+  const matches = worldTreeManifest.filter((node) => {
+    const searchable = [node.label, node.altLabels, node.hiddenLabels]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+    return searchable.includes(query);
+  });
+  const shown = Math.min(worldTreeSearchLimit, matches.length);
+  const rows = matches.slice(0, shown).map((node) => {
+    const config = TRUNK_CONFIG[node.trunkCategory] || TRUNK_CONFIG.Cognition;
+    return `
+      <button class="world-tree-node" type="button"
+        data-action="world-tree-open-node" data-node-id="${escapeHTML(node.id)}"
+        style="--trunk-color:${config.color};">
+        <span class="world-tree-node__label">${escapeHTML(node.label)}</span>
+        <span class="world-tree-node__meta">${escapeHTML(node.trunkCategory)} · ${Math.round(node.classificationConfidence * 100)}% confidence</span>
+      </button>`;
+  }).join("");
+  const loadMore = shown < matches.length
+    ? `<button class="archive-load-more" type="button" data-action="world-tree-search-more">
+        Load more — showing ${shown.toLocaleString()} of ${matches.length.toLocaleString()}
+      </button>`
+    : "";
+
+  els.worldTreeList.innerHTML = `
+    <p class="world-tree-search-summary">${matches.length.toLocaleString()} matches for “${escapeHTML(worldTreeSearchQuery.trim())}”</p>
+    <div class="world-tree-nodes">${
+      rows || '<div class="empty">No World Tree nodes match this search.</div>'
+    }</div>
+    ${loadMore}`;
+}
+
+function renderWorldTreeTrunk() {
+  if (!els.worldTreeList || !worldTreeManifest || !worldTreeActiveTrunk) return;
+  const config = TRUNK_CONFIG[worldTreeActiveTrunk];
+  const nodes = worldTreeManifest.filter((node) => node.trunkCategory === worldTreeActiveTrunk);
+  const shown = Math.min(worldTreeRenderLimit, nodes.length);
+  const nodeRows = nodes.slice(0, shown).map((node) => `
+    <button class="world-tree-node" type="button"
+      data-action="world-tree-open-node" data-node-id="${escapeHTML(node.id)}"
+      style="--trunk-color:${config.color};">
+      <span class="world-tree-node__label">${escapeHTML(node.label)}</span>
+      <span class="world-tree-node__meta">${escapeHTML(node.nodeType)} · ${Math.round(node.classificationConfidence * 100)}% confidence</span>
+    </button>`).join("");
+  const loadMore = shown < nodes.length
+    ? `<button class="archive-load-more" type="button" data-action="world-tree-load-more">
+        Load more — showing ${shown.toLocaleString()} of ${nodes.length.toLocaleString()}
+      </button>`
+    : "";
+
+  els.worldTreeList.innerHTML = `
+    <div class="world-tree-list-head">
+      <button class="btn ghost" type="button" data-action="world-tree-overview">← All trunks</button>
+      <h4>${escapeHTML(config.label)}</h4>
+      <span class="world-tree-node__meta">${nodes.length.toLocaleString()} nodes</span>
+    </div>
+    <div class="world-tree-nodes">${nodeRows}</div>
+    ${loadMore}`;
+}
+
+function openWorldTreeNode(nodeId) {
+  const entry = worldTreeManifestById.get(nodeId);
+  if (!entry || !els.worldTreeDetailModal || !els.worldTreeDetailContent) return;
+
+  worldTreeDetailNodeId = nodeId;
+  worldTreeParentLimit = 25;
+  worldTreeChildLimit = 25;
+  renderWorldTreeNodeDetail();
+  showModal(els.worldTreeDetailModal);
+
+  if (worldTreeFullGraph) {
+    renderWorldTreeNodeDetail();
+    return;
+  }
+  if (!worldTreeFullGraphPromise) {
+    const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+    if (!graphApi || typeof graphApi.load !== "function") {
+      renderWorldTreeNodeDetail("The graph detail loader is unavailable.");
+      return;
+    }
+    worldTreeFullGraphPromise = graphApi.load()
+      .then((graph) => {
+        worldTreeFullGraph = graph;
+        if (worldTreeDetailNodeId) renderWorldTreeNodeDetail();
+        return graph;
+      })
+      .catch((error) => {
+        worldTreeFullGraphPromise = null;
+        renderWorldTreeNodeDetail(error.message || String(error));
+        return null;
+      });
+  }
+}
+
+function worldTreeEdgeLinks(ids, relation, visibleLimit) {
+  if (!ids.length) {
+    return `<p class="world-tree-detail__muted">No ${relation.toLowerCase()} edges.</p>`;
+  }
+  const visible = ids.slice(0, visibleLimit);
+  const links = visible.map((id) => {
+    const entry = worldTreeManifestById.get(id);
+    return `<button class="world-tree-edge-link" type="button"
+      data-action="world-tree-open-node" data-node-id="${escapeHTML(id)}">${
+        escapeHTML(entry ? entry.label : id)
+      }</button>`;
+  }).join("");
+  const more = visible.length < ids.length
+    ? `<button class="world-tree-edge-more" type="button"
+        data-action="world-tree-more-edges" data-relation="${relation.toLowerCase()}">
+        Show ${Math.min(25, ids.length - visible.length)} more
+      </button>`
+    : "";
+  return `<div class="world-tree-edge-links">${links}${more}</div>`;
+}
+
+function renderWorldTreeNodeDetail(errorMessage = "") {
+  if (!els.worldTreeDetailContent || !worldTreeDetailNodeId) return;
+  const entry = worldTreeManifestById.get(worldTreeDetailNodeId);
+  if (!entry) return;
+  const config = TRUNK_CONFIG[entry.trunkCategory] || TRUNK_CONFIG.Cognition;
+  const fullNode = worldTreeFullGraph && worldTreeFullGraph.getNode(worldTreeDetailNodeId);
+  const statusLabel = entry.status === "auto_committed" ? "Classified" : "Awaiting review";
+  const detailBody = errorMessage
+    ? `<p class="world-tree-detail__error">Description and graph edges could not be reached: ${escapeHTML(errorMessage)}</p>`
+    : fullNode
+      ? `
+        <p class="world-tree-detail__description">${escapeHTML(fullNode.description || "No description available.")}</p>
+        <div class="world-tree-detail__edges">
+          <section>
+            <h3>Parents (${fullNode.parents.length.toLocaleString()})</h3>
+            ${worldTreeEdgeLinks(fullNode.parents, "Parents", worldTreeParentLimit)}
+          </section>
+          <section>
+            <h3>Children (${fullNode.children.length.toLocaleString()})</h3>
+            ${worldTreeEdgeLinks(fullNode.children, "Children", worldTreeChildLimit)}
+          </section>
+        </div>`
+      : '<p class="world-tree-detail__muted">Loading description and graph edges…</p>';
+
+  els.worldTreeDetailContent.innerHTML = `
+    <div class="world-tree-detail__head">
+      <div>
+        <h2 id="worldTreeDetailTitle">${escapeHTML(entry.label)}</h2>
+        <p>${escapeHTML(entry.nodeType)} · ${escapeHTML(entry.source)}</p>
+      </div>
+      <button class="btn ghost" type="button" data-action="world-tree-close-detail" aria-label="Close World Tree detail">Close</button>
+    </div>
+    <div class="world-tree-detail__classification"
+      style="--trunk-color:${config.color};--trunk-soft:${config.soft};">
+      <strong>${escapeHTML(entry.trunkCategory)}</strong>
+      <span>${statusLabel} · ${Math.round(entry.classificationConfidence * 100)}% confidence</span>
+    </div>
+    ${detailBody}`;
 }
 
 const TIER_CONFIG = {
@@ -7329,6 +7892,24 @@ document.addEventListener("click", (event) => {
   if (action === "open-coach-export") openCoachExport();
   if (action === "close-coach-export") closeCoachExport();
   if (action === "copy-coach-export") copyCoachExport();
+  if (action === "world-tree-retry") ensureWorldTreeLoaded();
+  if (action === "world-tree-overview") showWorldTreeOverview();
+  if (action === "world-tree-open-trunk") openWorldTreeTrunk(actionTarget.dataset.trunk);
+  if (action === "world-tree-open-node") openWorldTreeNode(actionTarget.dataset.nodeId);
+  if (action === "world-tree-close-detail") hideModal(els.worldTreeDetailModal);
+  if (action === "world-tree-more-edges") {
+    if (actionTarget.dataset.relation === "parents") worldTreeParentLimit += 25;
+    if (actionTarget.dataset.relation === "children") worldTreeChildLimit += 25;
+    renderWorldTreeNodeDetail();
+  }
+  if (action === "world-tree-load-more") {
+    worldTreeRenderLimit += WORLD_TREE_RENDER_PAGE;
+    renderWorldTreeTrunk();
+  }
+  if (action === "world-tree-search-more") {
+    worldTreeSearchLimit += WORLD_TREE_RENDER_PAGE;
+    renderWorldTreeSearchResults();
+  }
   if (action === "toggle-founder-bug-form") {
     founderMetricsUi.bugFormOpen = !founderMetricsUi.bugFormOpen;
     founderMetricsUi.fixFormOpen = false;
@@ -7381,6 +7962,13 @@ document.addEventListener("change", (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  if (!event.target || event.target.id !== "worldTreeSearch") return;
+  worldTreeSearchQuery = event.target.value;
+  worldTreeSearchLimit = WORLD_TREE_RENDER_PAGE;
+  if (worldTreeManifest) renderWorldTreeSearchResults();
+});
+
 document.addEventListener("keydown", (event) => {
   // Enter / Space activates non-button elements exposed as role="button"
   // (e.g. the tappable metric cards on the Command Center).
@@ -7394,7 +7982,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   if (event.key !== "Escape") return;
-  [els.questModal, els.noteModal, els.financeModal, els.disciplineModal, els.identityModal, els.skillModal, els.incomeModal, els.pipelineModal, els.echoModal, els.taskModal, els.coachExportModal].forEach(hideModal);
+  [els.questModal, els.noteModal, els.financeModal, els.disciplineModal, els.identityModal, els.skillModal, els.incomeModal, els.pipelineModal, els.echoModal, els.taskModal, els.coachExportModal, els.worldTreeDetailModal].forEach(hideModal);
 });
 
 $$(".modal-bg").forEach((modal) => {
@@ -8210,7 +8798,7 @@ function classifyQuery(userInput) {
    rest of the Phase 3 skeleton.
    ------------------------------------------------------------------------- */
 
-const DIRECTIVE_SCHEMA_VERSION = '1.0';
+const DIRECTIVE_SCHEMA_VERSION = '1.2';
 const ARBITRATION_SCHEMA_VERSION = '1.0';
 const ARBITRATION_CONFIDENCE_FLOOR = 0.5;
 
@@ -8222,8 +8810,18 @@ const DIRECTIVE_DOMAINS = ['DISCIPLINE', 'INCOME', 'SKILL', 'SPIRITUAL',
 const DIRECTIVE_POLARITIES = ['PUSH', 'HOLD', 'MAINTAIN'];
 
 // Single factory for every DirectiveObject, V1 stubs and Phase 3 live parses
-// alike (§7: same function, no refactor). Throws on bad source/polarity —
+// alike (§7: same function, no refactor). Throws on bad source/polarity/domain —
 // those are integration errors, not player data, and must fail loudly.
+// Domain-enum amendment (owner directive, 2026-07-03, schema bumped to 1.1):
+// an unrecognized domain now throws instead of silently falling back to
+// GENERAL. Fail-open was masking malformed synthesis-layer output; fail-closed
+// surfaces the bug at its origin instead of letting it drift downstream as a
+// silently-miscategorized GENERAL directive.
+// mandateVersion amendment (owner dispatch, 2026-07-03, bicameral-2c, schema
+// bumped to 1.2): every directive logs the version of the hemisphere mandate
+// config that produced it, alongside contextSnapshotId — a directive is
+// traceable to both the exact context snapshot AND the exact reasoning
+// mandate. Additive and nullable: pre-1.2 directives read as null.
 function createDirective(fields) {
   const f = fields || {};
   if (!DIRECTIVE_SOURCES.includes(f.source)) {
@@ -8232,66 +8830,264 @@ function createDirective(fields) {
   if (!DIRECTIVE_POLARITIES.includes(f.polarity)) {
     throw new TypeError(`createDirective: invalid polarity "${f.polarity}"`);
   }
+  if (!DIRECTIVE_DOMAINS.includes(f.domain)) {
+    throw new TypeError(`createDirective: invalid domain "${f.domain}"`);
+  }
   return {
     schemaVersion: DIRECTIVE_SCHEMA_VERSION,
     source: f.source,
-    domain: DIRECTIVE_DOMAINS.includes(f.domain) ? f.domain : 'GENERAL',
+    domain: f.domain,
     polarity: f.polarity,
     confidence: Math.max(0, Math.min(1, Number(f.confidence) || 0)),
     directiveText: String(f.directiveText || ''),
     reasoningSummary: String(f.reasoningSummary || ''), // transparency clause — always present
     initiatedBy: (f.initiatedBy === 'KAIRU' || f.initiatedBy === 'PLAYER') ? f.initiatedBy : null,
     contextSnapshotId: f.contextSnapshotId || null,
+    mandateVersion: f.mandateVersion || null,
     createdAt: KAIRU_TIME.iso()
   };
 }
 
-// Left hemisphere (analytical). STUB — Phase 3 routes to Gemini with context
-// injection. Emits a DirectiveObject.
+/* ----------------------------------------------------------------------------
+   BICAMERAL CALLING INFRASTRUCTURE (bicameral-2c-proxy-wiring, 2026-07-03)
+   Plumbing only — no live integration, no keys, no spend. Both hemisphere
+   callers route through one shared entry point (callHemisphere) which picks
+   an adapter behind a single feature flag. §7 pattern: the same function
+   serves the deterministic mock today and the Phase 3 proxy later; flipping
+   the flag is the V1→V2 seam, not a refactor.
+   ------------------------------------------------------------------------- */
+
+// Feature flag gating live hemisphere calls. This flag is the SOLE determinant
+// of which adapter runs — no environment sniffing, no test-mode special case,
+// no per-call override. Default OFF: mockHemisphereAdapter, deterministic,
+// zero network. Turning it on is a deliberate code change that routes
+// callHemisphere() through liveHemisphereAdapter (Phase 3 proxy).
+const KAIRU_LIVE_HEMISPHERE_CALLS = false;
+
+// Versioned hemisphere mandate config — the ONLY place either hemisphere's
+// reasoning mandate is defined. Never inline mandate text at a call site;
+// every directive logs the mandateVersion that produced it (DirectiveObject
+// schema 1.2), so a mandate edit requires a version bump here to keep old
+// directives traceable to the exact mandate they were reasoned under.
+// allowedInputFields is enforced structurally by filterContextForHemisphere,
+// not by convention — see below.
+const HEMISPHERE_MANDATES = Object.freeze({
+  LEFT_BRAIN: Object.freeze({
+    mandateVersion: 'left-1.0',
+    hemisphere: 'LEFT_BRAIN',
+    mandateText:
+      'You are KAIRU\'s left hemisphere: the analytical ledger. Reason ONLY ' +
+      'from the verified event log in the context you receive — logged quest ' +
+      'completions, recorded discipline history, reported financials, ' +
+      'pipeline stages, and earned skill XP. Stated goals, self-reported ' +
+      'intent, trajectory projections, and any unverified signal are outside ' +
+      'your mandate and are not present in your context. If the verified ' +
+      'record does not support a directive, hold. Emit exactly one directive.',
+    allowedInputFields: Object.freeze([
+      'meta', 'quests', 'disciplines', 'financial', 'pipeline', 'skills'
+    ])
+  }),
+  RIGHT_BRAIN: Object.freeze({
+    mandateVersion: 'right-1.0',
+    hemisphere: 'RIGHT_BRAIN',
+    mandateText:
+      'You are KAIRU\'s right hemisphere: the psychological navigator. You ' +
+      'may reason from trajectory, stated intent, identity and ceremony ' +
+      'signals, and patterns that cut across life domains. Unverified signal ' +
+      'may be weighted — at reduced confidence, never as fact. Read the ' +
+      'momentum and life-context shifts the raw ledger cannot show. Emit ' +
+      'exactly one directive.',
+    allowedInputFields: Object.freeze([
+      'meta', 'nervousSystem', 'quests', 'disciplines', 'financial',
+      'pipeline', 'skills', 'namebind'
+    ])
+  })
+});
+
+// Structural mandate enforcement: the context object an adapter receives
+// contains ONLY that hemisphere's allowedInputFields. Left brain cannot read
+// nervousSystem trajectory or namebind intent because those keys do not exist
+// on the object it is handed — the boundary is the object's shape, not a
+// comment asking adapters to behave.
+function filterContextForHemisphere(context, mandate) {
+  const source = context || {};
+  const filtered = {};
+  for (const field of mandate.allowedInputFields) {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      filtered[field] = source[field];
+    }
+  }
+  return filtered;
+}
+
+// Default adapter in dev and test. Deterministic: identical filtered context
+// in, identical DirectiveObject out. No network, no randomness, no clock
+// reads outside KAIRU_TIME. The rules below are input-driven fixtures chosen
+// to exercise the real arbitration surface (CROSSROADS / CAVEAT /
+// PASS_THROUGH) from realistic context shapes — a sustained discipline drop
+// coinciding with a job-change signal splits the hemispheres exactly the way
+// the live models are mandated to split.
+const mockHemisphereAdapter = {
+  name: 'MOCK',
+  async callHemisphere(hemisphere, filteredContext, userInput, mandate) {
+    const ctx = filteredContext || {};
+    const missedDays = Number(ctx.disciplines && ctx.disciplines.recentMissedDays) || 0;
+    // A "drop" requires a baseline: a brand-new ledger with no archived
+    // completions has missed days but no track record to have dropped from.
+    const hasLedgerHistory = (Number(ctx.quests && ctx.quests.totalArchived) || 0) > 0;
+    const sustainedDrop = missedDays >= 5 && hasLedgerHistory;
+    const base = {
+      source: hemisphere,
+      initiatedBy: 'PLAYER',
+      contextSnapshotId: (ctx.meta && ctx.meta.contextSnapshotId) || null,
+      mandateVersion: mandate.mandateVersion
+    };
+
+    if (hemisphere === 'LEFT_BRAIN') {
+      // Verified-ledger rule: a sustained miss pattern in the logged record
+      // reads as overextension. The ledger cannot see why — so it holds.
+      if (sustainedDrop) {
+        return createDirective({
+          ...base,
+          domain: 'DISCIPLINE',
+          polarity: 'HOLD',
+          confidence: 0.8,
+          directiveText: 'Hold new commitments until the logged discipline baseline is restored.',
+          reasoningSummary: `Verified log shows ${missedDays} missed discipline days in the last 7 — sustained drop, cause unknown to the ledger.`
+        });
+      }
+      return createDirective({
+        ...base,
+        domain: 'GENERAL',
+        polarity: 'MAINTAIN',
+        confidence: 0.6,
+        directiveText: 'Verified record is steady; maintain course.',
+        reasoningSummary: 'No verified deviation in the event log.'
+      });
+    }
+
+    // RIGHT_BRAIN — mandated to weight cross-domain pattern and trajectory.
+    const offers = Number(ctx.pipeline && ctx.pipeline.byStage && ctx.pipeline.byStage.offer) || 0;
+    const trajectory = (ctx.nervousSystem && ctx.nervousSystem.trajectory) || 'Stable';
+    if (sustainedDrop && offers >= 1) {
+      // Cross-domain read: the discipline dip coincides with a job-change
+      // signal in the pipeline. Push through the transition — but confidence
+      // depends on whether the (unverified) trajectory corroborates.
+      const corroborated = trajectory === 'Ascending';
+      return createDirective({
+        ...base,
+        domain: 'DISCIPLINE',
+        polarity: 'PUSH',
+        confidence: corroborated ? 0.75 : 0.4,
+        directiveText: 'Push through the transition; the discipline dip is situational, not structural.',
+        reasoningSummary: `Discipline dip coincides with a job-change signal (${offers} offer-stage); trajectory ${trajectory} — unverified, weighted accordingly.`
+      });
+    }
+    return createDirective({
+      ...base,
+      domain: 'GENERAL',
+      polarity: 'MAINTAIN',
+      confidence: 0.6,
+      directiveText: 'No cross-domain pattern warrants a course change; maintain.',
+      reasoningSummary: 'Trajectory and cross-domain signals are quiet.'
+    });
+  }
+};
+
+// Phase 3 target endpoint. Per CLAUDE.md §6, live hemisphere calls go through
+// a server-side proxy that holds the provider keys — no API key ever ships
+// client-side (§13). The proxy receives the mandate and the filtered context
+// and returns directive fields.
+const KAIRU_HEMISPHERE_PROXY_URL = '/api/kairu/hemisphere';
+
+// Live adapter STUB — fully wired to make a real call, deliberately dead
+// until KAIRU_LIVE_HEMISPHERE_CALLS is turned on AND the Phase 3 proxy is
+// deployed. Nothing in this file invokes it while the flag is off. It needs
+// no key or secret in this repo: authentication lives server-side in the
+// proxy by design.
+const liveHemisphereAdapter = {
+  name: 'LIVE',
+  async callHemisphere(hemisphere, filteredContext, userInput, mandate) {
+    if (typeof fetch !== 'function') {
+      throw new Error('liveHemisphereAdapter: fetch is unavailable in this environment.');
+    }
+    const response = await fetch(KAIRU_HEMISPHERE_PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hemisphere,
+        mandateVersion: mandate.mandateVersion,
+        mandateText: mandate.mandateText,
+        context: filteredContext,
+        userInput: String(userInput || '')
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`liveHemisphereAdapter: proxy returned ${response.status} for ${hemisphere}.`);
+    }
+    const parsed = await response.json();
+    // Live parses go through the same factory as mock output (§7) — schema
+    // validation fails loudly on malformed proxy responses.
+    return createDirective({
+      source: hemisphere,
+      domain: parsed.domain,
+      polarity: parsed.polarity,
+      confidence: parsed.confidence,
+      directiveText: parsed.directiveText,
+      reasoningSummary: parsed.reasoningSummary,
+      initiatedBy: 'PLAYER',
+      contextSnapshotId: (filteredContext && filteredContext.meta && filteredContext.meta.contextSnapshotId) || null,
+      mandateVersion: mandate.mandateVersion
+    });
+  }
+};
+
+// The flag is the only branch. Do not add further conditions here.
+function getHemisphereAdapter() {
+  return KAIRU_LIVE_HEMISPHERE_CALLS ? liveHemisphereAdapter : mockHemisphereAdapter;
+}
+
+// Single shared entry point both hemisphere callers use. Looks up the
+// hemisphere's mandate, structurally filters the context to its
+// allowedInputFields, and hands off to whichever adapter the flag selects.
+async function callHemisphere(hemisphere, context, userInput) {
+  const mandate = HEMISPHERE_MANDATES[hemisphere];
+  if (!mandate) {
+    throw new TypeError(`callHemisphere: unknown hemisphere "${hemisphere}"`);
+  }
+  const filteredContext = filterContextForHemisphere(context, mandate);
+  return getHemisphereAdapter().callHemisphere(hemisphere, filteredContext, userInput, mandate);
+}
+
+// Left hemisphere (analytical — verified ledger only). Thin delegate; the
+// adapter seam behind callHemisphere is where Phase 3 goes live.
 async function callLeftBrain(context, userInput) {
-  console.log('[KAIRU] callLeftBrain stub called. Phase 3 will route to Gemini.');
-  return createDirective({
-    source: 'LEFT_BRAIN',
-    domain: 'GENERAL',
-    polarity: 'MAINTAIN',
-    confidence: 0,
-    directiveText: '[Left brain stub — Gemini integration pending Phase 3]',
-    reasoningSummary: 'Stub — no live model call was made.',
-    initiatedBy: 'PLAYER',
-    contextSnapshotId: (context && context.meta && context.meta.contextSnapshotId) || null
-  });
+  return callHemisphere('LEFT_BRAIN', context, userInput);
 }
 
-// Right hemisphere (psychological). STUB — Phase 3 routes to the Anthropic API
-// with context injection. Emits a DirectiveObject.
+// Right hemisphere (psychological — trajectory, intent, cross-domain pattern).
 async function callRightBrain(context, userInput) {
-  console.log('[KAIRU] callRightBrain stub called. Phase 3 will route to Claude API.');
-  return createDirective({
-    source: 'RIGHT_BRAIN',
-    domain: 'GENERAL',
-    polarity: 'MAINTAIN',
-    confidence: 0,
-    directiveText: '[Right brain stub — Claude API integration pending Phase 3]',
-    reasoningSummary: 'Stub — no live model call was made.',
-    initiatedBy: 'PLAYER',
-    contextSnapshotId: (context && context.meta && context.meta.contextSnapshotId) || null
-  });
+  return callHemisphere('RIGHT_BRAIN', context, userInput);
 }
 
-// Opposition is PUSH vs HOLD only. MAINTAIN is steady-state — disagreeing
-// with it is a caveat, not a crossroads worth interrupting the player for.
+// Opposition is any polarity mismatch — PUSH vs HOLD, PUSH vs MAINTAIN, and
+// HOLD vs MAINTAIN all count (owner ruling, 2026-07-02 — restores the
+// original day-one lock; supersedes the PUSH/HOLD-only narrowing).
 function polarityOpposes(polarityA, polarityB) {
-  return (polarityA === 'PUSH' && polarityB === 'HOLD') ||
-         (polarityA === 'HOLD' && polarityB === 'PUSH');
+  return polarityA !== polarityB;
 }
 
-// DESIGN GATE RESOLVED (owner directive, 2026-07-01 — supersedes the parked
-// left-wins default): PASS_THROUGH if domains differ; CROSSROADS if domains
-// match, polarity opposes, and both confidences clear the floor; CAVEAT
-// otherwise. Both input directives are retained verbatim, never mutated,
-// never discarded. resolvedDirective for PASS_THROUGH/CAVEAT is the
-// higher-confidence directive (tie → directiveA, preserving the old
-// left-first ordering). CROSSROADS resolves only via resolveCrossroads().
+// DESIGN GATE RESOLVED (owner directive, 2026-07-01; amended 2026-07-02):
+// PASS_THROUGH if domains differ; CROSSROADS if domains match, polarity
+// opposes, and both confidences clear the floor; CAVEAT otherwise. Both
+// input directives are retained verbatim, never mutated, never discarded.
+// resolvedDirective for CAVEAT is the higher-confidence directive (tie →
+// directiveA, preserving the old left-first ordering). resolvedDirective for
+// PASS_THROUGH is ALWAYS null — domain mismatch means there was never a real
+// conflict, so ranking one directive over the other by confidence is
+// meaningless (owner ruling, 2026-07-02; amends the original schema comment
+// that read "set for PASS_THROUGH and CAVEAT only"). CROSSROADS resolves
+// only via resolveCrossroads().
 function arbitrate(directiveA, directiveB) {
   const domainsMatch = directiveA.domain === directiveB.domain;
   const bothConfident =
@@ -8308,6 +9104,7 @@ function arbitrate(directiveA, directiveB) {
   }
 
   const isCrossroads = resultType === 'CROSSROADS';
+  const isPassThrough = resultType === 'PASS_THROUGH';
   const winner = directiveB.confidence > directiveA.confidence ? directiveB : directiveA;
   const now = KAIRU_TIME.iso();
 
@@ -8315,7 +9112,7 @@ function arbitrate(directiveA, directiveB) {
     schemaVersion: ARBITRATION_SCHEMA_VERSION,
     resultType,
     directives: [directiveA, directiveB],
-    resolvedDirective: isCrossroads ? null : winner,
+    resolvedDirective: (isCrossroads || isPassThrough) ? null : winner,
     confidenceFloorApplied: ARBITRATION_CONFIDENCE_FLOOR, // logged so past results stay legible if the floor moves
     playerChoice: null,
     resolvedAt: isCrossroads ? null : now,
@@ -8368,8 +9165,12 @@ async function queryKAIRU(userInput) {
       callLeftBrain(context, userInput),
       callRightBrain(context, userInput)
     ]);
-    // response is the resolved directive — null on CROSSROADS, where the
-    // player must choose via resolveCrossroads() before anything is surfaced.
+    // response is arbitration.resolvedDirective, which is null in two
+    // distinct cases: CROSSROADS (a real conflict — the player must choose
+    // via resolveCrossroads() before anything is surfaced) and PASS_THROUGH
+    // (domains differed, so there was never a real conflict to rank; null
+    // here does not mean "unresolved"). Never branch on `response !== null`
+    // alone — always check `arbitration.resultType` to tell these apart.
     const arbitration = arbitrate(leftDirective, rightDirective);
     return {
       context,
@@ -8438,7 +9239,15 @@ if (typeof window !== 'undefined') {
       renderEconomicAgency,
       economicAgencyEvents: ECONOMIC_AGENCY_EVENTS,
       economicAgencyTierMultipliers: ECONOMIC_AGENCY_TIER_MULTIPLIERS,
-      economicAgencyLevelThresholds: ECONOMIC_AGENCY_LEVEL_THRESHOLDS
+      economicAgencyLevelThresholds: ECONOMIC_AGENCY_LEVEL_THRESHOLDS,
+      // Bicameral 2c: proxy-wiring test surface. callHemisphere is exposed
+      // here (test mode only) — production window.KAIRU still does not export
+      // the hemisphere callers.
+      callHemisphere,
+      filterContextForHemisphere,
+      hemisphereMandates: HEMISPHERE_MANDATES,
+      liveHemisphereCallsFlag: KAIRU_LIVE_HEMISPHERE_CALLS,
+      getHemisphereAdapterName: () => getHemisphereAdapter().name
     };
   }
 }

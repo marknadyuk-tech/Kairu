@@ -1,33 +1,45 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
 
 :root {
-  color-scheme: dark;
-  --bg: #030508;
-  --surface: #0A0D14;
-  --surface-2: #111520;
-  --surface-3: #181E2C;
-  --surface-glass: rgba(10, 13, 20, 0.7);
-  --line: #1E2533;
-  --line-soft: rgba(0, 245, 212, 0.08);
-  --gold: #FFB300;
-  --gold-soft: rgba(255, 179, 0, 0.08);
-  --gold-glow: 0 0 20px rgba(255, 179, 0, 0.35);
-  --cyan: #00E5FF;
-  --cyan-soft: rgba(0, 229, 255, 0.08);
-  --cyan-glow: 0 0 20px rgba(0, 229, 255, 0.4);
-  --green: #00E676;
-  --green-soft: rgba(0, 230, 118, 0.08);
-  --green-glow: 0 0 20px rgba(0, 230, 118, 0.3);
-  --red: #FF1744;
-  --red-soft: rgba(255, 23, 68, 0.08);
-  --red-glow: 0 0 20px rgba(255, 23, 68, 0.3);
-  --violet: #D500F9;
-  --violet-soft: rgba(213, 0, 249, 0.08);
-  --violet-glow: 0 0 20px rgba(213, 0, 249, 0.3);
-  --text: #EBF1F5;
-  --text-muted: #8A9CB0;
-  --text-dim: #55677D;
-  --shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  color-scheme: light;
+  --bg: #F6F1E8;
+  --surface: #FFFDF8;
+  --surface-2: #F1E9DC;
+  --surface-3: #E8DDCC;
+  --surface-glass: rgba(255, 253, 248, 0.82);
+  --line: #D8CCB9;
+  --line-soft: rgba(108, 131, 113, 0.18);
+  --gold: #B78A45;
+  --gold-soft: rgba(183, 138, 69, 0.12);
+  --gold-glow: 0 10px 30px rgba(145, 105, 48, 0.18);
+  --cyan: #6F8F7A;
+  --cyan-soft: rgba(111, 143, 122, 0.13);
+  --cyan-glow: 0 10px 30px rgba(87, 119, 97, 0.16);
+  --green: #7D9B6F;
+  --green-soft: rgba(125, 155, 111, 0.13);
+  --green-glow: 0 10px 30px rgba(96, 128, 84, 0.16);
+  --red: #B75645;
+  --red-soft: rgba(183, 86, 69, 0.12);
+  --red-glow: 0 10px 30px rgba(183, 86, 69, 0.18);
+  --violet: #7B718E;
+  --violet-soft: rgba(123, 113, 142, 0.12);
+  --violet-glow: 0 10px 30px rgba(123, 113, 142, 0.15);
+  --amber: #C08A3E;
+  --amber-soft: rgba(192, 138, 62, 0.12);
+  --amber-glow: 0 10px 30px rgba(192, 138, 62, 0.17);
+  --rose: #B0596B;
+  --rose-soft: rgba(176, 89, 107, 0.12);
+  --rose-glow: 0 10px 30px rgba(176, 89, 107, 0.16);
+  --indigo: #6E7BA8;
+  --indigo-soft: rgba(110, 123, 168, 0.12);
+  --indigo-glow: 0 10px 30px rgba(110, 123, 168, 0.16);
+  --slate: #7A8A94;
+  --slate-soft: rgba(122, 138, 148, 0.12);
+  --slate-glow: 0 10px 30px rgba(122, 138, 148, 0.16);
+  --text: #2F342E;
+  --text-muted: #6F756A;
+  --text-dim: #8A8478;
+  --shadow: 0 24px 70px rgba(78, 62, 42, 0.12);
   --mono: "JetBrains Mono", monospace;
   --sans: "Inter", sans-serif;
   --display: "Outfit", sans-serif;
@@ -49,8 +61,8 @@ body {
   color: var(--text);
   font-family: var(--sans);
   background: 
-    radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.06) 0%, transparent 50%),
-    radial-gradient(circle at 100% 60%, rgba(255, 179, 0, 0.04) 0%, transparent 40%),
+    radial-gradient(circle at 18% 0%, rgba(111, 143, 122, 0.16) 0%, transparent 34%),
+    radial-gradient(circle at 100% 54%, rgba(183, 138, 69, 0.12) 0%, transparent 38%),
     var(--bg);
   background-attachment: fixed;
 }
@@ -70,7 +82,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid rgba(0, 229, 255, 0.85);
+  outline: 2px solid rgba(111, 143, 122, 0.75);
   outline-offset: 2px;
 }
 
@@ -329,7 +341,7 @@ textarea:focus-visible {
 }
 
 .page-title {
-  /* The current page is now shown in the header subtitle (PHASE 2.5.1 // PAGE),
+  /* The current page is now shown in the header subtitle (PHASE 2.6 // PAGE),
      so the large per-page title is redundant and hidden app-wide. */
   display: none;
   margin: 0;
@@ -2949,4 +2961,582 @@ body.sanctuary-active .app {
 .archive-load-more:focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 2px;
+}
+
+/* ---- Trust UI V0.1 visual pass --------------------------------------------
+   Light-mode first, calm cards, larger touch targets. These rules style existing
+   controls without changing data-action contracts or persistence behavior. */
+body.operator-dark {
+  color-scheme: dark;
+  --bg: #11130F;
+  --surface: #191B16;
+  --surface-2: #20241D;
+  --surface-3: #2A2E25;
+  --surface-glass: rgba(25, 27, 22, 0.82);
+  --line: #343B30;
+  --line-soft: rgba(154, 177, 147, 0.16);
+  --text: #F5F0E7;
+  --text-muted: #B8B19F;
+  --text-dim: #8F8878;
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  --amber: #D29A4D;
+  --amber-soft: rgba(210, 154, 77, 0.15);
+  --amber-glow: 0 10px 30px rgba(210, 154, 77, 0.18);
+  --rose: #C46B7E;
+  --rose-soft: rgba(196, 107, 126, 0.15);
+  --rose-glow: 0 10px 30px rgba(196, 107, 126, 0.18);
+  --indigo: #8190BD;
+  --indigo-soft: rgba(129, 144, 189, 0.15);
+  --indigo-glow: 0 10px 30px rgba(129, 144, 189, 0.18);
+  --slate: #91A1AA;
+  --slate-soft: rgba(145, 161, 170, 0.15);
+  --slate-glow: 0 10px 30px rgba(145, 161, 170, 0.18);
+}
+
+/* ---- World Tree: bounded trunk and node-list views ------------------------- */
+.world-tree-trunks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.world-tree-search {
+  width: min(340px, 100%);
+}
+
+.world-tree-search input {
+  width: 100%;
+}
+
+.world-tree-search-summary {
+  margin: 0 0 14px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  #worldTree .section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .world-tree-search {
+    width: 100%;
+  }
+}
+
+.world-tree-trunk {
+  min-height: 142px;
+  padding: 18px;
+  color: var(--text);
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--trunk-color) 28%, var(--line));
+  border-radius: 16px;
+  background: linear-gradient(145deg, var(--trunk-soft), var(--surface));
+  box-shadow: var(--trunk-glow);
+  cursor: pointer;
+}
+
+.world-tree-trunk__swatch {
+  display: block;
+  width: 34px;
+  height: 5px;
+  margin-bottom: 28px;
+  border-radius: 999px;
+  background: var(--trunk-color);
+}
+
+.world-tree-trunk__name,
+.world-tree-node__label {
+  display: block;
+  font-family: var(--display);
+  font-weight: 700;
+}
+
+.world-tree-trunk__meta,
+.world-tree-node__meta {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.world-tree-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.world-tree-list-head h4 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.world-tree-nodes {
+  display: grid;
+  gap: 8px;
+}
+
+.world-tree-node {
+  width: 100%;
+  padding: 13px 15px;
+  color: var(--text);
+  text-align: left;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--trunk-color);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.world-tree-trunk:hover,
+.world-tree-node:hover {
+  transform: translateY(-1px);
+  border-color: var(--trunk-color);
+}
+
+.world-tree-detail-bg {
+  align-items: flex-end;
+  padding: 20px 20px 0;
+}
+
+.world-tree-detail {
+  width: min(680px, 100%);
+  max-height: 84vh;
+  overflow-y: auto;
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+}
+
+.world-tree-detail__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.world-tree-detail__head h2 {
+  margin: 0;
+  color: var(--text);
+}
+
+.world-tree-detail__head p,
+.world-tree-detail__muted {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.world-tree-detail__classification {
+  display: grid;
+  gap: 4px;
+  margin-top: 18px;
+  padding: 13px;
+  border: 1px solid var(--trunk-color);
+  border-radius: 12px;
+  background: var(--trunk-soft);
+}
+
+.world-tree-detail__classification strong {
+  color: var(--trunk-color);
+}
+
+.world-tree-detail__classification span {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.world-tree-detail__description {
+  margin: 18px 0;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.world-tree-detail__edges {
+  display: grid;
+  gap: 18px;
+}
+
+.world-tree-detail__edges h3 {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.world-tree-edge-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.world-tree-edge-link,
+.world-tree-edge-more {
+  padding: 0;
+  color: var(--cyan);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.world-tree-edge-more {
+  color: var(--text-dim);
+}
+
+.world-tree-detail__error {
+  color: var(--red);
+}
+
+.sidebar,
+.topbar,
+.bottom-nav,
+.more-sheet__panel {
+  background: rgba(255, 253, 248, 0.88);
+  backdrop-filter: blur(18px);
+}
+
+body.operator-dark .sidebar,
+body.operator-dark .topbar,
+body.operator-dark .bottom-nav,
+body.operator-dark .more-sheet__panel {
+  background: rgba(25, 27, 22, 0.88);
+}
+
+.sidebar {
+  box-shadow: 12px 0 40px rgba(93, 75, 49, 0.06);
+}
+
+.brand__name,
+.page-title,
+.section-title,
+.quest-title,
+.track-title {
+  letter-spacing: 0;
+}
+
+.brand__sub,
+.eyebrow,
+.card__label,
+.section-note,
+.tab__hint,
+.system-note {
+  letter-spacing: 0.06em;
+}
+
+.section,
+.card,
+.quest-card,
+.finance-stack,
+.modal,
+.track-panel,
+.founder-panel,
+.echo-card,
+.task-row {
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.section,
+.card,
+.quest-card,
+.modal,
+.track-panel {
+  background: linear-gradient(180deg, rgba(255, 253, 248, 0.96), rgba(250, 245, 236, 0.94));
+}
+
+.card::before,
+.card--primary::before {
+  opacity: 0.65;
+}
+
+.btn,
+.tab,
+.bottom-nav__item,
+.more-sheet__link {
+  min-height: 44px;
+  border-radius: 14px;
+}
+
+.btn.primary,
+.btn.cyan {
+  color: #FFFDF8;
+}
+
+.btn.primary:hover,
+.btn.cyan:hover {
+  box-shadow: var(--shadow);
+}
+
+.btn.ghost {
+  border-color: rgba(111, 143, 122, 0.14);
+  background: rgba(255, 253, 248, 0.42);
+}
+
+.tab.active,
+.bottom-nav__item.active {
+  box-shadow: inset 0 0 0 1px rgba(111, 143, 122, 0.22);
+}
+
+.privacy-status-section {
+  border-color: rgba(111, 143, 122, 0.22);
+  background:
+    linear-gradient(135deg, rgba(111, 143, 122, 0.13), rgba(255, 253, 248, 0.92) 42%),
+    var(--surface);
+}
+
+.trust-head {
+  align-items: flex-start;
+}
+
+.trust-status-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trust-status-tile {
+  display: grid;
+  gap: 6px;
+  min-height: 112px;
+  padding: 14px;
+  border: 1px solid rgba(111, 143, 122, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.trust-status-tile span,
+.trust-status-tile small,
+.trust-pill,
+.domain-pill,
+.node-card p,
+.sovereignty-panel p,
+.sovereignty-card p,
+.node-ledger__empty span {
+  color: var(--text-muted);
+}
+
+.trust-status-tile span,
+.trust-pill,
+.domain-pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trust-status-tile b {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.trust-status-tile small {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.trust-status-tile.is-private {
+  border-color: rgba(111, 143, 122, 0.36);
+  background: rgba(111, 143, 122, 0.1);
+}
+
+.sovereignty-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 20px;
+  align-items: stretch;
+  background:
+    radial-gradient(circle at 88% 8%, rgba(183, 138, 69, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(255, 253, 248, 0.98), rgba(241, 233, 220, 0.82));
+}
+
+.sovereignty-hero__copy h3 {
+  margin: 12px 0 10px;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: clamp(30px, 6vw, 56px);
+  line-height: 1;
+}
+
+.sovereignty-hero__copy p,
+.sovereignty-card p,
+.sovereignty-panel p,
+.node-card p {
+  max-width: 62ch;
+  margin: 0;
+  line-height: 1.55;
+}
+
+.sovereignty-hero__status {
+  display: grid;
+  gap: 10px;
+}
+
+.visibility-grid,
+.sovereignty-grid,
+.node-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.visibility-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sovereignty-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.node-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.sovereignty-card,
+.sovereignty-panel,
+.node-card,
+.node-ledger__empty {
+  border: 1px solid rgba(111, 143, 122, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 253, 248, 0.76);
+  box-shadow: var(--shadow);
+}
+
+.sovereignty-card,
+.sovereignty-panel,
+.node-card {
+  padding: 18px;
+}
+
+.sovereignty-card__top,
+.node-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.sovereignty-card h4,
+.sovereignty-panel h3,
+.node-card h4 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-family: var(--display);
+  font-size: 18px;
+}
+
+.sovereignty-card.is-current {
+  border-color: rgba(111, 143, 122, 0.42);
+  background: rgba(111, 143, 122, 0.1);
+}
+
+.trust-pill,
+.domain-pill {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border: 1px solid rgba(111, 143, 122, 0.22);
+  border-radius: 999px;
+  background: rgba(111, 143, 122, 0.1);
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.trust-pill.locked,
+.domain-pill.locked {
+  border-color: rgba(183, 86, 69, 0.22);
+  color: var(--red);
+  background: rgba(183, 86, 69, 0.08);
+}
+
+.trust-pill.inactive {
+  border-color: rgba(138, 132, 120, 0.22);
+  background: rgba(138, 132, 120, 0.08);
+}
+
+.domain-list,
+.trust-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.node-ledger__empty {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  background: rgba(111, 143, 122, 0.08);
+}
+
+.b-rank-panel {
+  border-color: rgba(183, 138, 69, 0.24);
+  background:
+    linear-gradient(135deg, rgba(183, 138, 69, 0.12), rgba(255, 253, 248, 0.84)),
+    var(--surface);
+}
+
+.b-rank-panel.is-eligible {
+  border-color: rgba(183, 138, 69, 0.44);
+}
+
+.tombstone-example {
+  margin-top: 12px !important;
+  padding: 12px;
+  border: 1px dashed rgba(111, 143, 122, 0.28);
+  border-radius: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .trust-status-grid,
+  .visibility-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .node-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .sovereignty-hero,
+  .sovereignty-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .trust-status-grid,
+  .visibility-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section,
+  .card,
+  .quest-card,
+  .sovereignty-card,
+  .sovereignty-panel,
+  .node-card {
+    border-radius: 14px;
+  }
+
+  .trust-status-tile {
+    min-height: auto;
+  }
 }
