@@ -30,6 +30,7 @@ New-Item -ItemType Directory -Force -Path "$dst\data\skill-graph" | Out-Null
 Copy-Item "$src\data\skill-graph\skill_render_manifest.json" "$dst\data\skill-graph\skill_render_manifest.json" -Force
 Copy-Item "$src\data\skill-graph\skill_nodes.json" "$dst\data\skill-graph\skill_nodes.json" -Force
 Copy-Item "$src\data\skill-graph\skill_edges.json" "$dst\data\skill-graph\skill_edges.json" -Force
+Copy-Item "$src\data\skill-graph\career_node_map.json" "$dst\data\skill-graph\career_node_map.json" -Force
 
 # Stamp which Kairu-source commit this build came from, so a weird phone
 # bug can be traced back to an exact commit instead of guessing.
