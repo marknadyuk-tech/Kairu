@@ -1,0 +1,119 @@
+{
+  "careers": {
+    "Software Engineer": [
+      "http://data.europa.eu/esco/skill/3cd569a2-4f88-4c1e-9995-8dce8c5e51a7",
+      "http://data.europa.eu/esco/skill/e5d1f825-60ed-4bdd-872a-e748c387f777",
+      "http://data.europa.eu/esco/skill/598de5b0-5b58-4ea7-8058-a4bc4d18c742",
+      "http://data.europa.eu/esco/skill/2b92a5b2-6758-4ee3-9fb4-b6387a55cc8f",
+      "http://data.europa.eu/esco/skill/3a2d5b45-56e4-4f5a-a55a-4a4a65afdc43",
+      "http://data.europa.eu/esco/skill/0f9958d2-f700-4f62-b90b-a5873cb5ae4c"
+    ],
+    "Sales / Business": [
+      "onet:2.B.1.c",
+      "http://data.europa.eu/esco/skill/966ade6d-9450-48f6-a955-83d4e9ad9ca3",
+      "http://data.europa.eu/esco/skill/6a2c391b-1fcd-4f10-8827-5d1cb4a4d9ad",
+      "http://data.europa.eu/esco/skill/8dcbcabe-09f7-4d11-940d-125af57bbc40",
+      "http://data.europa.eu/esco/skill/71152876-b629-4a99-b9ea-0f25a0d07e4e"
+    ],
+    "Creative / Designer": [
+      "http://data.europa.eu/esco/skill/7fb699d9-182a-430e-b7a0-6d8ed05c284b",
+      "http://data.europa.eu/esco/skill/754690ad-6207-4e1c-9df7-9a2b58afa587",
+      "http://data.europa.eu/esco/skill/ce592b28-4467-4908-b2e6-64bbe18da631",
+      "http://data.europa.eu/esco/skill/5ce80f97-b385-4a41-9339-a6593d0709c1",
+      "http://data.europa.eu/esco/skill/1072f444-8a7d-41c1-aa6f-d536f20d94bf",
+      "http://data.europa.eu/esco/skill/1ef9cce1-bce6-4ec6-9071-41348f4c1acd"
+    ],
+    "Athlete / Physical": [
+      "onet:1.A.3.a.1",
+      "onet:1.A.3.a.3",
+      "onet:1.A.3.b",
+      "onet:1.A.3.c.1",
+      "onet:1.A.3.c.3"
+    ],
+    "Healthcare": [
+      "http://data.europa.eu/esco/skill/71480db1-a706-47f9-952f-bdc5036e3df3",
+      "http://data.europa.eu/esco/skill/7a63f944-6948-4ae4-9c1f-d08e492535c9",
+      "http://data.europa.eu/esco/skill/46b391a6-bbd9-4e80-afb0-ad205101af59",
+      "http://data.europa.eu/esco/skill/ecee574b-4332-4cb4-b81c-d7ac71a0e2e2",
+      "http://data.europa.eu/esco/skill/98eb1f3b-3480-416b-bd4b-811946f7e347"
+    ],
+    "Trades / Skilled Labor": [
+      "http://data.europa.eu/esco/skill/19858dd3-a5fe-4855-b644-6ecfefd1c384",
+      "http://data.europa.eu/esco/skill/5bcec244-3efe-45ac-8891-0ab4a91e9c48",
+      "http://data.europa.eu/esco/skill/68b6ef08-d823-489d-a95c-752ae6f6e6a7",
+      "http://data.europa.eu/esco/skill/32b02bd1-6bf2-497a-bb16-94aeeafaf44f"
+    ]
+  },
+  "resume_categories": {
+    "Sales": [
+      "http://data.europa.eu/esco/skill/306a1555-9fa2-47af-b996-a0a8833cbe81",
+      "http://data.europa.eu/esco/skill/3e28860e-f520-461d-8282-a32264c4f4a1",
+      "http://data.europa.eu/esco/skill/c09bf6d4-f8a7-40f3-aead-ef01643f2352",
+      "http://data.europa.eu/esco/skill/2f573ad6-1fa6-46c5-a48d-912368fe55aa",
+      "http://data.europa.eu/esco/skill/e7219848-a27a-4bf4-8775-d367707be7c9"
+    ],
+    "Business Development": [
+      "http://data.europa.eu/esco/skill/a4bbd0d9-a6be-4472-b05d-291e60cf6b4b",
+      "http://data.europa.eu/esco/skill/ead58f22-0af5-467c-ac1e-b750e4e1ac6a",
+      "http://data.europa.eu/esco/skill/d207a30b-2f80-4138-9b77-f88d549b8768",
+      "http://data.europa.eu/esco/skill/62bf2e21-2613-47f1-a624-fe0fc925e671",
+      "http://data.europa.eu/esco/skill/ee7f90cc-922e-4da7-a7ae-83c2688fed10"
+    ],
+    "Negotiation": [
+      "http://data.europa.eu/esco/skill/7954861c-86d4-4529-afbb-2c23dab9ac74",
+      "http://data.europa.eu/esco/skill/7ee9fb56-91b1-4363-b51f-ea54ae1b5761",
+      "onet:2.B.1.d",
+      "http://data.europa.eu/esco/skill/5f2efbdf-08a2-49cd-9c06-bd284e4f0fbf",
+      "http://data.europa.eu/esco/skill/9e9a4209-c7cf-4f6e-973e-dc2ffadccc74"
+    ],
+    "Real Estate": [
+      "http://data.europa.eu/esco/skill/a0225b42-4c3a-4551-962b-9facffa07d4c",
+      "http://data.europa.eu/esco/skill/a727b46f-880a-4acb-9138-b7531b9d4121",
+      "http://data.europa.eu/esco/skill/6f6163dc-a801-416c-86e9-ce857d71c24d",
+      "http://data.europa.eu/esco/skill/b1a1149a-9bc5-468d-9d09-f6d171cfd619",
+      "http://data.europa.eu/esco/skill/b3a4924a-f793-485c-8dc1-54e12198d95d"
+    ],
+    "Finance": [
+      "http://data.europa.eu/esco/skill/ecc18804-a466-40d9-98b4-fba5cd67dd4b",
+      "onet:1.B.3.ah",
+      "http://data.europa.eu/esco/skill/905b6acd-377b-46b9-9d80-e47e9ca789ca",
+      "http://data.europa.eu/esco/skill/49047409-9307-4b41-9b04-a9615f049044",
+      "http://data.europa.eu/esco/skill/811bdb9d-5bf7-4b5a-a3f5-4fc2002f6d57"
+    ],
+    "Operations": [
+      "http://data.europa.eu/esco/skill/e843973c-23dd-416a-8a9c-9e89512542fb",
+      "http://data.europa.eu/esco/skill/958b8802-ec3e-4813-97f7-6c8f48610dbd",
+      "http://data.europa.eu/esco/skill/75b30aeb-34c0-40f4-b77d-271d75a98b14",
+      "http://data.europa.eu/esco/skill/0e1fe34b-f4e7-4642-8c8b-5a05ac3438e5",
+      "http://data.europa.eu/esco/skill/96d549bb-3e62-4c45-92a7-f114df089581"
+    ],
+    "Technical": [
+      "http://data.europa.eu/esco/skill/3cd569a2-4f88-4c1e-9995-8dce8c5e51a7",
+      "http://data.europa.eu/esco/skill/e5d1f825-60ed-4bdd-872a-e748c387f777",
+      "http://data.europa.eu/esco/skill/598de5b0-5b58-4ea7-8058-a4bc4d18c742",
+      "http://data.europa.eu/esco/skill/ccd0a1d9-afda-43d9-b901-96344886e14d",
+      "http://data.europa.eu/esco/skill/11430d93-c835-48ed-8e70-285fa69c9ae6"
+    ],
+    "Leadership": [
+      "http://data.europa.eu/esco/skill/1f1d2ff8-c4c1-45cc-9812-6a7ee84a73cb",
+      "http://data.europa.eu/esco/skill/b7e752ec-7b2e-46e6-ac24-8b1233609c31",
+      "http://data.europa.eu/esco/skill/d5145a9a-602e-40bf-b3e1-f04cf9c3ef86",
+      "http://data.europa.eu/esco/skill/9601b2a8-68e4-4906-9306-a23679b8f0b0",
+      "http://data.europa.eu/esco/skill/a584a638-a2c0-4b3c-bdf3-a64f87225be9",
+      "http://data.europa.eu/esco/skill/339ac029-066a-4985-9f9d-b3d7c8fea0bb"
+    ],
+    "Entrepreneurship": [
+      "http://data.europa.eu/esco/skill/658605f2-1c95-49f0-bd98-0af7b15ad0b0",
+      "http://data.europa.eu/esco/skill/61ddacb8-c89f-48c2-afe8-9e1b14c0c8fb",
+      "http://data.europa.eu/esco/skill/ead58f22-0af5-467c-ac1e-b750e4e1ac6a",
+      "http://data.europa.eu/esco/skill/bdcf429c-5ccf-4c3d-bb61-4c987573a35e"
+    ],
+    "Languages": [
+      "http://data.europa.eu/esco/skill/33859d93-987c-4caa-a0a9-6159ea7bbc2a",
+      "http://data.europa.eu/esco/skill/e747e77e-0ea1-4001-8b07-1d11946b5f1b",
+      "http://data.europa.eu/esco/skill/4812a4ea-dc55-4dc6-b9b0-4a59bba2c647",
+      "http://data.europa.eu/esco/skill/584c13e8-fd06-4ca3-a45b-cca5b2f147a7",
+      "http://data.europa.eu/esco/skill/14ee9f76-3524-43d5-8a1a-5ba8283f8bd7"
+    ]
+  }
+}

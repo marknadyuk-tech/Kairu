@@ -529,7 +529,6 @@ const VALID_VIEWS = [
   "command",
   "quests",
   "discipline",
-  "skills",
   "tasks",
   "pipeline",
   "financial",
@@ -538,7 +537,8 @@ const VALID_VIEWS = [
   "chronicle"
 ];
 const VIEW_ALIASES = {
-  archive: "chronicle"
+  archive: "chronicle",
+  skills: "worldtree"
 };
 const VIEW_DOM_IDS = {
   chronicle: "archive",
@@ -548,7 +548,6 @@ const PAGE_SHORT_NAMES = {
   command: "Command",
   quests: "Quests",
   discipline: "Discipline",
-  skills: "Skills",
   tasks: "Tasks",
   pipeline: "Pipeline",
   financial: "Financial",
@@ -561,7 +560,6 @@ const copy = {
   command:   { eyebrow: "KAIRU Command",       title: "Command Center" },
   quests:    { eyebrow: "Quest Board",         title: "Quests" },
   archive:   { eyebrow: "KAIRU Chronicle",     title: "Chronicle" },
-  skills:    { eyebrow: "Skill Registry",      title: "Skills" },
   financial: { eyebrow: "Financial Inventory", title: "Financial" },
   sovereignty: { eyebrow: "Security & Data", title: "Sovereignty" },
   worldTree: { eyebrow: "Capability Atlas", title: "World Tree" },
@@ -588,7 +586,7 @@ function viewStatusHTML(view) {
     }
     case 'quests':    return escapeHTML(plural((state.activeQuests || []).length, 'active mission'));
     case 'discipline':return escapeHTML(plural((state.disciplines || []).filter(disciplineAppliesToday).length, 'protocol') + ' today');
-    case 'skills':    return escapeHTML(plural((state.skills || []).length, 'active skill'));
+    case 'worldTree': return escapeHTML(plural(getWorldTreeTouchedNodeIds().size, 'active node'));
     case 'pipeline':  return escapeHTML(plural((state.jobPipeline || []).length, 'opportunity', 'opportunities') + ' tracked');
     case 'tasks':     return escapeHTML(plural((state.tasks || []).filter(t => !t.done && !t.completed).length, 'open task'));
     case 'financial': return escapeHTML(formatMoney((state.financials.assets || 0) - (state.financials.liabilities || 0)) + ' net worth');
@@ -681,14 +679,14 @@ const defaultState = {
     trackingActive: false,
     startDate: null
   },
-  // Skills start empty for every new operator. The registry is populated through
-  // onboarding (resume extraction, career selection, or manual creation) so KAIRU
-  // ships as a clean product rather than seeded with one person's capabilities.
+  // Retained only for backward-compatible persistence. The unified World Tree
+  // overlay is the live source; do not migrate or delete legacy rows here.
   skills: []
 };
 
 let state = structuredClone(defaultState);
 let pendingQuestId = null;
+let questTargetNodeId = null;
 const founderMetricsUi = {
   bugFormOpen: false,
   fixFormOpen: false,
@@ -720,14 +718,11 @@ function assembleContext() {
     daysTracked: Number(s.daysTracked) || 0
   };
 
-  // Skills: surface expert-tier explicitly (high-signal for opportunity routing),
-  // plus a count per tier.
+  // Preserve the frozen context shape. Expert/tier mappings are not defined for
+  // overlay current_level yet, so leave them empty rather than inventing one.
   const tierCounts = {};
-  (s.skills || []).forEach(sk => {
-    tierCounts[sk.tier] = (tierCounts[sk.tier] || 0) + 1;
-  });
   const skills = {
-    expert: (s.skills || []).filter(sk => sk.tier === 'expert').map(sk => sk.name),
+    expert: [],
     registryXP: developmentTotals.kxp,
     questAllocatedKXP: getQuestAllocatedKXP(),
     tierCounts
@@ -1373,6 +1368,7 @@ const els = {
   skillsList: $("#skillsList"),
   worldTreeList: $("#worldTreeList"),
   worldTreeSearch: $("#worldTreeSearch"),
+  worldTreeOnboarding: $("#worldTreeOnboarding"),
   worldTreeDetailModal: $("#worldTreeDetailModal"),
   worldTreeDetailContent: $("#worldTreeDetailContent"),
   identityModal: $("#identityModal"),
@@ -2077,19 +2073,44 @@ function parseSkillList(value, primarySkill = "") {
 function refreshQuestSkillOptions() {
   const select = document.getElementById("questPrimarySkillInput");
   if (!select) return;
-  const skills = Array.isArray(state.skills) ? state.skills : [];
-  select.innerHTML = '<option value="">None</option>' + skills
-    .map(skill => `<option value="${escapeHTML(skill.name)}">${escapeHTML(skill.name)}</option>`)
-    .join("");
+  select.innerHTML = '<option value="">None</option>';
 }
 
-function applySkillXPAllocation(skillXpEarned = {}) {
-  const entries = Object.entries(skillXpEarned);
-  if (!entries.length || !Array.isArray(state.skills)) return;
-  entries.forEach(([name, amount]) => {
-    const skill = state.skills.find(item => String(item.name || "").toLowerCase() === String(name).toLowerCase());
-    if (skill) skill.xp = Math.round((Number(skill.xp) || 0) + (Number(amount) || 0));
-  });
+function applySkillXPAllocation(quest) {
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (
+    !graphApi ||
+    typeof graphApi.logEvent !== "function" ||
+    typeof graphApi.getOverlayState !== "function"
+  ) {
+    return;
+  }
+
+  const skillWeights = (quest.rawInputs && Array.isArray(quest.rawInputs.skillWeights))
+    ? quest.rawInputs.skillWeights
+    : [];
+
+  for (const { skill: nodeId, weight } of skillWeights) {
+    if (!worldTreeManifestById.has(nodeId)) continue;
+
+    // The overlay `xp` cache is last-write-wins (deriveSkillGraphOverlayFromEvents
+    // keeps only the latest event per node) -- read prior XP before writing so a
+    // second quest against the same node accumulates instead of clobbering it.
+    const prior = graphApi.getOverlayState(KAIRU_LOCAL_USER_ID, nodeId);
+    const priorXP = prior ? Number(prior.xp) || 0 : 0;
+    const currentLevel = prior ? prior.current_level : 1;
+    const earned = Math.round((Number(quest.xp_earned) || 0) * weight);
+
+    graphApi.logEvent({
+      user_id: KAIRU_LOCAL_USER_ID,
+      node_id: nodeId,
+      state: "active",
+      current_level: currentLevel,
+      xp: priorXP + earned,
+      source: "quest",
+      initiatedBy: "player"
+    });
+  }
 }
 
 // Compact "Skill +N · Skill +N" breakdown of an allocation map, for completion
@@ -2122,8 +2143,24 @@ function getQuestAllocatedKXP() {
   }, 0);
 }
 
+function getSkillGraphOverlayRows() {
+  const graphApi = typeof window !== "undefined" && window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.readOverlay !== "function") return [];
+  return graphApi.readOverlay().filter((row) => row.user_id === KAIRU_LOCAL_USER_ID);
+}
+
 function getSkillXP() {
-  return (state.skills || []).reduce((sum, skill) => sum + (Number(skill.xp) || 0), 0);
+  return getSkillGraphOverlayRows().reduce((sum, row) => sum + (Number(row.xp) || 0), 0);
+}
+
+function getSkillGraphOverlayDisplayRows() {
+  return getSkillGraphOverlayRows().map((row) => {
+    const manifestEntry = worldTreeManifestById.get(row.node_id);
+    return {
+      ...row,
+      name: manifestEntry ? manifestEntry.label : row.node_id
+    };
+  });
 }
 
 // Earning economy a quest feeds on completion.
@@ -2386,8 +2423,8 @@ function trackToday() {
   showToast("Tracking locked // +3% XP active");
 }
 
-function openQuest() {
-  els.questTitle.value = "";
+function openQuest(prefill) {
+  els.questTitle.value = prefill && prefill.nodeLabel ? `Develop: ${prefill.nodeLabel}` : "";
   els.questDifficulty.value = "Rare";
   els.questDue.value = "";
   refreshQuestSkillOptions();
@@ -2401,12 +2438,26 @@ function openQuest() {
   document.getElementById('questProblemSolving').value = '3';
   document.getElementById('questAccountability').value = '3';
   document.getElementById('doc10Preview').style.display = 'none';
+
+  questTargetNodeId = prefill && prefill.nodeId ? prefill.nodeId : null;
+  const tiedIndicator = document.getElementById('questTiedSkillIndicator');
+  if (tiedIndicator) {
+    if (questTargetNodeId) {
+      tiedIndicator.textContent = `Tied to skill: ${prefill.nodeLabel}`;
+      tiedIndicator.style.display = 'block';
+    } else {
+      tiedIndicator.textContent = '';
+      tiedIndicator.style.display = 'none';
+    }
+  }
+
   syncXP();
   showModal(els.questModal);
   window.setTimeout(() => els.questTitle.focus(), 50);
 }
 
 function closeQuest() {
+  questTargetNodeId = null;
   hideModal(els.questModal);
 }
 
@@ -2484,7 +2535,10 @@ function saveQuest() {
 
   const difficulty = els.questDifficulty.value;
   const baseXP = computeDoc10XP();
-  const primarySkill = els.questPrimarySkill ? els.questPrimarySkill.value.trim() || null : null;
+  const targetNodeEntry = questTargetNodeId ? worldTreeManifestById.get(questTargetNodeId) : null;
+  const primarySkill = targetNodeEntry
+    ? targetNodeEntry.label
+    : els.questPrimarySkill ? els.questPrimarySkill.value.trim() || null : null;
   const supportSkills = parseSkillList(els.questSupportSkills ? els.questSupportSkills.value : "", primarySkill);
   const xpType = normalizeXpType(els.questXpType ? els.questXpType.value : "command");
 
@@ -2529,7 +2583,7 @@ function saveQuest() {
       K: knowHow,
       P: problemSolving,
       A: accountability,
-      skillWeights: [],        // V2 hook
+      skillWeights: questTargetNodeId ? [{ skill: questTargetNodeId, weight: 1 }] : [],
       spiritualRelevance: null // V1 spiritual tab hook
     },
     rawXPBeforeCaps: baseXP
@@ -2693,7 +2747,7 @@ function completeQuest(questId) {
   quest.raw_cxp = rawValue;
   quest.xp_band = capResult.band;
   quest.skillXpEarned = skillXpEarned;
-  applySkillXPAllocation(skillXpEarned);
+  if (awardsSkillXP) applySkillXPAllocation(quest);
   state.totalXP += capResult.postedXP;
   recordDailyXP(capResult.rawXP, capResult.postedXP, today, { exempt: isLegendaryQuest });
   const economy = awardsCXP && awardsSXP ? "CXP+SXP" : awardsSXP ? "SXP" : "CXP";
@@ -3345,8 +3399,8 @@ function renderReadiness() {
 }
 
 /* ===================== RESUME IMPORT =====================
-   Extracts DRAFT skills via keyword matching. Approving a draft creates a
-   starting skill record (evidenceSource: "resume"). No XP is ever awarded. */
+   Extracts DRAFT categories via keyword matching. Approval remains transient;
+   a separate player confirmation starts the mapped World Tree nodes. */
 const RESUME_KEYWORDS = {
   "Sales": ["sales", "selling", "quota", "closing", "account executive", "revenue", "upsell"],
   "Business Development": ["business development", "bizdev", "partnership", "go-to-market", "pipeline", "lead generation"],
@@ -3360,11 +3414,16 @@ const RESUME_KEYWORDS = {
   "Languages": ["bilingual", "fluent", "spanish", "french", "mandarin", "german", "portuguese", "arabic"]
 };
 
+function getResumeTextElement() {
+  return els.resumeText || document.getElementById("resumeTextInput");
+}
+
 function extractResumeSkills() {
-  const text = (els.resumeText.value || "").trim();
+  const resumeTextElement = getResumeTextElement();
+  const text = ((resumeTextElement && resumeTextElement.value) || "").trim();
   if (!text) {
     showToast("Paste resume text first");
-    els.resumeText.focus();
+    if (resumeTextElement) resumeTextElement.focus();
     return;
   }
   const lower = text.toLowerCase();
@@ -3409,56 +3468,45 @@ function buildResumeSuggestedQuests() {
 
 function clearResume() {
   // Doc 13 section 4.1: events with source:"resume" are permanent once logged
-  // and must survive a resume-import purge. This only ever touches
-  // state.resumeProfile, never state.economic_agency_events -- intentional.
+  // and must survive a resume-import purge. This only touches resumeProfile;
+  // skill_graph_overlay_events and economic_agency_events remain untouched.
   state.resumeProfile = { rawText: "", extractedSkills: [], approvedSkillIds: [], suggestedQuests: [] };
-  if (els.resumeText) els.resumeText.value = "";
+  const resumeTextElement = getResumeTextElement();
+  if (resumeTextElement) resumeTextElement.value = "";
   saveState();
+  renderWorldTreeOnboarding();
   renderResume();
   showToast("Resume import cleared");
 }
 
-function approveResumeSkills() {
+function approveResumeSkills(selectedDraftIds = null) {
   const profile = state.resumeProfile || {};
   const drafts = Array.isArray(profile.extractedSkills) ? profile.extractedSkills : [];
-  const checked = [...document.querySelectorAll('.draft-skill input[type="checkbox"]:checked')].map(c => c.value);
+  const checked = Array.isArray(selectedDraftIds)
+    ? selectedDraftIds
+    : [...document.querySelectorAll('.draft-skill input[type="checkbox"]:checked')].map(c => c.value);
   if (!checked.length) {
     showToast("Select at least one draft skill");
     return;
   }
-  if (!Array.isArray(state.skills)) state.skills = [];
   const approvedIds = new Set(profile.approvedSkillIds || []);
-  let added = 0;
   checked.forEach(draftId => {
     const draft = drafts.find(d => d.id === draftId);
     if (!draft) return;
-    // Skip if a resume skill with this id already lives in the registry.
-    if (state.skills.some(s => s.id === draft.id)) { approvedIds.add(draftId); return; }
-    state.skills.push({
-      id: draft.id,
-      name: draft.name,
-      category: draft.category,
-      tier: "acquiring",
-      xp: 0,            // starting record — no XP awarded from resume
-      xpMax: 2500,
-      tags: Array.isArray(draft.matches) ? draft.matches : [],
-      evidenceSource: "resume"
-    });
     approvedIds.add(draftId);
-    added++;
   });
   profile.approvedSkillIds = [...approvedIds];
   state.resumeProfile = profile;
   saveState();
+  renderWorldTreeOnboarding();
   renderResume();
-  renderSkills();
-  showToast(added ? `${added} skill${added === 1 ? "" : "s"} added to registry // no XP` : "Already in registry");
+  showToast(`${checked.length} resume categor${checked.length === 1 ? "y" : "ies"} approved // confirm to start`);
 }
 
 function renderResume() {
   const draftsEl = document.getElementById("resumeDrafts");
   const questsEl = document.getElementById("resumeSuggestedQuests");
-  const textEl = els.resumeText;
+  const textEl = getResumeTextElement();
   const profile = state.resumeProfile || {};
   if (textEl && !textEl.value && profile.rawText) textEl.value = profile.rawText;
 
@@ -3469,7 +3517,7 @@ function renderResume() {
       draftsEl.innerHTML = "";
     } else {
       const rows = drafts.map(d => {
-        const isApproved = approved.has(d.id) || (state.skills || []).some(s => s.id === d.id);
+        const isApproved = approved.has(d.id);
         const evidence = d.matches && d.matches.length ? ` · matched: ${escapeHTML(d.matches.join(", "))}` : "";
         return `
           <label class="draft-skill">
@@ -3657,7 +3705,7 @@ function buildCoachBrief() {
   const activeQuests = Array.isArray(s.activeQuests) ? s.activeQuests : [];
   const archived = Array.isArray(s.archivedQuests) ? s.archivedQuests : [];
   const disciplines = Array.isArray(s.disciplines) ? s.disciplines : [];
-  const skills = Array.isArray(s.skills) ? s.skills.slice() : [];
+  const skills = getSkillGraphOverlayDisplayRows();
   const pipeline = Array.isArray(s.jobPipeline) ? s.jobPipeline : [];
   const echoes = Array.isArray(s.echoes) ? s.echoes : [];
 
@@ -3757,22 +3805,14 @@ function buildCoachBrief() {
 
   L.push("## CURRENT SKILL SIGNALS");
   if (skills.length) {
-    const recentlyAdvanced = new Set();
-    progressionQuests.forEach(q => {
-      if (q.skillXpEarned && typeof q.skillXpEarned === "object") {
-        Object.entries(q.skillXpEarned).forEach(([name, v]) => { if ((Number(v) || 0) > 0) recentlyAdvanced.add(String(name).toLowerCase()); });
-      }
-    });
     skills.slice()
       .sort((a, b) => (Number(b.xp) || 0) - (Number(a.xp) || 0))
       .slice(0, 6)
       .forEach(sk => {
-        const tier = (typeof getTierLabel === "function") ? getTierLabel(sk.tier) : (sk.tier || "Acquiring");
-        const active = recentlyAdvanced.has(String(sk.name || "").toLowerCase()) ? " — recent activity" : "";
-        L.push(`- ${sk.name} is progressing through the ${tier} tier (${Number(sk.xp) || 0}/${Number(sk.xpMax) || 0} XP)${active}.`);
+        L.push(`- ${sk.name} // ${sk.state || "unknown"} // Level ${Number(sk.current_level) || 0} // ${(Number(sk.xp) || 0).toLocaleString()} XP.`);
       });
   } else {
-    L.push("- No skills registered — extraction or manual entry needed before quests can advance capability.");
+    L.push("- No World Tree nodes are active yet.");
   }
   L.push(sxpToday > 0
     ? `- Spiritual growth logged today (${sxpToday.toLocaleString()} SXP).`
@@ -5746,36 +5786,9 @@ function collectFinancialSignals() {
 }
 
 function collectSkillSignals() {
-  const signals = [];
-  const skills = Array.isArray(state.skills) ? state.skills : [];
-  const TIER_THRESHOLDS = {
-    acquiring: 1000, beginner: 1000, moderate: 1200, proficient: 1800, expert: 2500
-  };
-
-  const nearTier = skills.filter(skill => {
-    const invested = Number(skill.xp ?? skill.xpInvested ?? 0);
-    const max = Number(skill.xpMax || 0);
-    if (max > 0) return invested >= max * 0.8;
-    const threshold = TIER_THRESHOLDS[String(skill.tier).toLowerCase()] || 1000;
-    return invested >= threshold * 0.8;
-  });
-
-  if (nearTier.length > 0) {
-    signals.push({
-      type: "skill", severity: 2, source: "skills",
-      message: `${nearTier[0].name} approaching tier threshold.`,
-      action: `Complete a skill-linked quest to push ${nearTier[0].name} up.`
-    });
-  }
-  if (skills.length === 0) {
-    signals.push({
-      type: "warning", severity: 1, source: "skills",
-      message: "No skills registered.",
-      action: "Register primary skills to unlock skill XP tracking."
-    });
-  }
-
-  return signals;
+  // Overlay current_level has no tier-threshold doctrine yet. Do not invent
+  // near-tier signals from retired state.skills rows.
+  return [];
 }
 
 /* ===================== PHASE 2.6.5 // MOMENT VOICE =====================
@@ -5813,17 +5826,6 @@ function detectNearMissMoments() {
     } else if (streak >= 2 && (streak + 1) % 7 === 0) {
       moments.push({ momentType: "near-miss-streak-week", priority: 3,
         data: { name: d.name, streak } });
-    }
-  });
-
-  // near-miss-skill-tier: reuses the same 80%-of-max heuristic as
-  // collectSkillSignals, narrowed to a tighter near-miss band (85%+).
-  (state.skills || []).forEach(skill => {
-    const invested = Number(skill.xp ?? skill.xpInvested ?? 0);
-    const max = Number(skill.xpMax || 0);
-    if (max > 0 && invested < max && invested >= max * 0.85) {
-      moments.push({ momentType: "near-miss-skill-tier", priority: 4,
-        data: { name: skill.name, remaining: max - invested } });
     }
   });
 
@@ -7097,7 +7099,6 @@ function renderAll() {
   renderIncomeModule();
   renderPipeline();
   renderDisciplines();
-  renderSkills();
   renderWorldTree();
   renderSanctuary();
   renderSerendipity();
@@ -7106,13 +7107,13 @@ function renderAll() {
   renderEchoes();
   renderTasks();
   renderReadiness();
-  renderResume();
   renderEconomicAgency();
   updateViewStatus(); // keep the header status line's live numbers in sync
   els.bootCompound.textContent = `Compound Multiplier: ${compound().toFixed(2)}x`;
 }
 
 function renderWorldTree() {
+  renderWorldTreeOnboarding();
   if (!els.worldTreeList || els.worldTreeList.childElementCount > 0) return;
   els.worldTreeList.innerHTML = '<div class="empty">Growing the World Tree…</div>';
 }
@@ -7130,6 +7131,7 @@ const TRUNK_CONFIG = {
 };
 
 const WORLD_TREE_RENDER_PAGE = 100;
+const KAIRU_LOCAL_USER_ID = "kairu-local-player";
 let worldTreeManifest = null;
 let worldTreeLoadPromise = null;
 let worldTreeActiveTrunk = null;
@@ -7138,20 +7140,48 @@ let worldTreeManifestById = new Map();
 let worldTreeFullGraph = null;
 let worldTreeFullGraphPromise = null;
 let worldTreeDetailNodeId = null;
+let worldTreeDetailOverlayState = null;
 let worldTreeParentLimit = 25;
 let worldTreeChildLimit = 25;
 let worldTreeSearchQuery = "";
 let worldTreeSearchLimit = WORLD_TREE_RENDER_PAGE;
+const worldTreeOnboardingSelectedNodeIds = new Set();
+let worldTreeCareerNodeMap = null;
+let worldTreeCareerNodeMapPromise = null;
+let worldTreeCareerNodeMapError = "";
+let worldTreeOnboardingSelectedCareer = "";
+
+function isWorldTreeViewActive() {
+  const activeView = document.querySelector(".view.active");
+  return Boolean(activeView && activeView.id === VIEW_DOM_IDS.worldtree);
+}
+
+function ensureWorldTreeFullGraphLoaded(graphApi) {
+  if (worldTreeFullGraph) return Promise.resolve(worldTreeFullGraph);
+  if (worldTreeFullGraphPromise) return worldTreeFullGraphPromise;
+  if (!graphApi || typeof graphApi.load !== "function") return Promise.resolve(null);
+
+  worldTreeFullGraphPromise = graphApi.load()
+    .then((graph) => {
+      worldTreeFullGraph = graph;
+      if (isWorldTreeViewActive()) renderWorldTreeActivitySurface();
+      if (worldTreeDetailNodeId) renderWorldTreeNodeDetail();
+      return graph;
+    })
+    .catch((error) => {
+      worldTreeFullGraphPromise = null;
+      if (worldTreeDetailNodeId) {
+        renderWorldTreeNodeDetail(error.message || String(error));
+      }
+      console.error("World Tree graph load failed", error);
+      return null;
+    });
+  return worldTreeFullGraphPromise;
+}
 
 function ensureWorldTreeLoaded(afterScriptLoad = false) {
   if (!els.worldTreeList) return Promise.resolve(null);
-  if (worldTreeManifest) {
-    if (worldTreeSearchQuery) renderWorldTreeSearchResults();
-    else renderWorldTreeOverview();
-    return Promise.resolve(worldTreeManifest);
-  }
-  if (worldTreeLoadPromise) return worldTreeLoadPromise;
-
+  ensureWorldTreeCareerNodeMapLoaded();
   const graphApi = window.KAIRU && window.KAIRU.skillGraph;
   if (!graphApi || typeof graphApi.loadWorldTreeManifest !== "function") {
     if (!afterScriptLoad) {
@@ -7161,6 +7191,14 @@ function ensureWorldTreeLoaded(afterScriptLoad = false) {
     }
     return Promise.resolve(null);
   }
+
+  ensureWorldTreeFullGraphLoaded(graphApi);
+  if (worldTreeManifest) {
+    if (worldTreeSearchQuery) renderWorldTreeSearchResults();
+    else renderWorldTreeOverview();
+    return Promise.resolve(worldTreeManifest);
+  }
+  if (worldTreeLoadPromise) return worldTreeLoadPromise;
 
   els.worldTreeList.innerHTML = '<div class="empty">Growing the World Tree…</div>';
   worldTreeLoadPromise = graphApi.loadWorldTreeManifest()
@@ -7184,26 +7222,313 @@ function ensureWorldTreeLoaded(afterScriptLoad = false) {
   return worldTreeLoadPromise;
 }
 
+function ensureWorldTreeCareerNodeMapLoaded() {
+  if (worldTreeCareerNodeMap) return Promise.resolve(worldTreeCareerNodeMap);
+  if (worldTreeCareerNodeMapPromise) return worldTreeCareerNodeMapPromise;
+
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.loadCareerNodeMap !== "function") {
+    worldTreeCareerNodeMapError = "Starting paths are unavailable.";
+    renderWorldTreeOnboarding();
+    return Promise.resolve(null);
+  }
+
+  worldTreeCareerNodeMapError = "";
+  worldTreeCareerNodeMapPromise = graphApi.loadCareerNodeMap()
+    .then((nodeMap) => {
+      worldTreeCareerNodeMap = nodeMap;
+      worldTreeCareerNodeMapPromise = null;
+      renderWorldTreeOnboarding();
+      return nodeMap;
+    })
+    .catch((error) => {
+      worldTreeCareerNodeMapPromise = null;
+      worldTreeCareerNodeMapError = "Starting paths could not be reached.";
+      renderWorldTreeOnboarding();
+      console.error("World Tree career node map load failed", error);
+      return null;
+    });
+  return worldTreeCareerNodeMapPromise;
+}
+
+function getWorldTreeTouchedNodeIds() {
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.getTouchedNodeIds !== "function") return new Set();
+  return new Set(graphApi.getTouchedNodeIds(KAIRU_LOCAL_USER_ID));
+}
+
+// Children of active-pursuit nodes, minus already-touched nodes. A v1
+// approximation (CLAUDE.md-adjacent roadmap note: edges are ESCO/O*NET's
+// semantic hierarchy, not a designed prerequisite graph) — purely additive
+// UI, never gates the existing manual-search path. Returns an empty Set,
+// never throws, until the tree-wide graph (Chunk 3.1) has resolved.
+function getWorldTreeNextAvailableNodeIds() {
+  if (!worldTreeFullGraph || typeof worldTreeFullGraph.getChildren !== "function") {
+    return new Set();
+  }
+  const touchedNodeIds = getWorldTreeTouchedNodeIds();
+  const nextAvailable = new Set();
+  touchedNodeIds.forEach((nodeId) => {
+    worldTreeFullGraph.getChildren(nodeId).forEach((childId) => {
+      if (!touchedNodeIds.has(childId)) nextAvailable.add(childId);
+    });
+  });
+  return nextAvailable;
+}
+
+function renderWorldTreeOnboarding() {
+  if (!els.worldTreeOnboarding) return;
+  if (getWorldTreeTouchedNodeIds().size > 0) {
+    worldTreeOnboardingSelectedNodeIds.clear();
+    worldTreeOnboardingSelectedCareer = "";
+    els.worldTreeOnboarding.innerHTML = "";
+    return;
+  }
+
+  const selectedNodes = Array.from(worldTreeOnboardingSelectedNodeIds).map((nodeId) => {
+    const node = worldTreeManifestById.get(nodeId);
+    return `<span class="world-tree-onboarding__selection">${escapeHTML(node ? node.label : nodeId)}</span>`;
+  }).join("");
+  const selectedCount = worldTreeOnboardingSelectedNodeIds.size;
+  const careerEntries = worldTreeCareerNodeMap && worldTreeCareerNodeMap.careers
+    ? Object.entries(worldTreeCareerNodeMap.careers)
+    : [];
+  const careerOptions = careerEntries.map(([careerName, nodeIds]) => {
+    const isSelected = worldTreeOnboardingSelectedCareer === careerName;
+    return `
+      <button class="world-tree-onboarding__career${isSelected ? " is-selected" : ""}" type="button"
+        data-action="world-tree-select-career" data-career="${escapeHTML(careerName)}"
+        aria-pressed="${isSelected}">
+        <span>${escapeHTML(careerName)}</span>
+        <small>${nodeIds.length} starting nodes</small>
+      </button>`;
+  }).join("");
+  const careerStatus = worldTreeCareerNodeMapError
+    ? `<span class="world-tree-onboarding__empty">${escapeHTML(worldTreeCareerNodeMapError)}</span>`
+    : careerOptions || '<span class="world-tree-onboarding__empty">Loading starting paths...</span>';
+  const approvedResumeNodeCount = getApprovedResumeNodeIds().length;
+
+  els.worldTreeOnboarding.innerHTML = `
+    <section class="world-tree-onboarding" aria-labelledby="worldTreeOnboardingTitle">
+      <div class="world-tree-onboarding__copy">
+        <span class="eyebrow">First roots</span>
+        <h4 id="worldTreeOnboardingTitle">Choose your first pursuits</h4>
+        <p>Build a custom set from the World Tree or choose a reviewed starting path. Nothing is added until you confirm.</p>
+      </div>
+      <div class="world-tree-onboarding__options">
+        <div class="world-tree-onboarding__option">
+          <span class="eyebrow">Choose manually</span>
+          <h5>Search and select nodes</h5>
+          <p>Use the World Tree search to mark one or more capabilities.</p>
+          <div class="world-tree-onboarding__status">
+            <div class="world-tree-onboarding__selections">${
+              selectedNodes || '<span class="world-tree-onboarding__empty">No nodes selected yet.</span>'
+            }</div>
+            <button class="btn primary" type="button" data-action="world-tree-start-pursuing"${
+              selectedCount ? "" : " disabled"
+            }>Start Pursuing${selectedCount ? ` (${selectedCount})` : ""}</button>
+          </div>
+        </div>
+        <div class="world-tree-onboarding__option">
+          <span class="eyebrow">Starting path</span>
+          <h5>Pick a starting path</h5>
+          <p>Choose one reviewed career path, then confirm its starting nodes.</p>
+          <div class="world-tree-onboarding__careers">${careerStatus}</div>
+          <button class="btn cyan" type="button" data-action="world-tree-start-career-preset"${
+            worldTreeOnboardingSelectedCareer ? "" : " disabled"
+          }>Start This Path${
+            worldTreeOnboardingSelectedCareer
+              ? ` (${escapeHTML(worldTreeOnboardingSelectedCareer)})`
+              : ""
+          }</button>
+        </div>
+        <div class="world-tree-onboarding__option world-tree-onboarding__option--resume">
+          <span class="eyebrow">Resume import</span>
+          <h5>Paste your resume</h5>
+          <p>KAIRU will suggest matching capability categories. Review and approve the drafts, then confirm once to start their mapped World Tree nodes.</p>
+          <textarea id="resumeTextInput" class="world-tree-onboarding__resume-text"
+            placeholder="Paste resume text here..." aria-label="Resume text"></textarea>
+          <div class="world-tree-onboarding__resume-actions">
+            <button class="btn ghost" type="button" data-action="extract-resume">Extract Drafts</button>
+            <button class="btn ghost" type="button" data-action="clear-resume">Clear Resume</button>
+          </div>
+          <div id="resumeDrafts"></div>
+          <button class="btn cyan" type="button" data-action="world-tree-start-resume"${
+            approvedResumeNodeCount ? "" : " disabled"
+          }>Start Resume Pursuits${
+            approvedResumeNodeCount ? ` (${approvedResumeNodeCount} nodes)` : ""
+          }</button>
+        </div>
+      </div>
+    </section>`;
+  renderResume();
+}
+
+function selectWorldTreeCareerPreset(careerName) {
+  const careers = worldTreeCareerNodeMap && worldTreeCareerNodeMap.careers;
+  if (
+    !careerName ||
+    !careers ||
+    !Array.isArray(careers[careerName]) ||
+    getWorldTreeTouchedNodeIds().size > 0
+  ) {
+    return;
+  }
+  worldTreeOnboardingSelectedCareer = careerName;
+  worldTreeOnboardingSelectedNodeIds.clear();
+  renderWorldTreeOnboarding();
+  if (worldTreeSearchQuery) renderWorldTreeSearchResults();
+}
+
+function startWorldTreeCareerPreset() {
+  const careers = worldTreeCareerNodeMap && worldTreeCareerNodeMap.careers;
+  const selectedNodeIds = careers && careers[worldTreeOnboardingSelectedCareer];
+  if (
+    getWorldTreeTouchedNodeIds().size > 0 ||
+    !Array.isArray(selectedNodeIds) ||
+    selectedNodeIds.length === 0
+  ) {
+    return;
+  }
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.logEvent !== "function") return;
+
+  selectedNodeIds.forEach((nodeId) => {
+    graphApi.logEvent({
+      user_id: KAIRU_LOCAL_USER_ID,
+      node_id: nodeId,
+      state: "active",
+      current_level: 1,
+      xp: 0,
+      source: "career_preset",
+      initiatedBy: "player"
+    });
+  });
+  worldTreeOnboardingSelectedCareer = "";
+  renderWorldTreeActivitySurface();
+}
+
+function getApprovedResumeNodeIds() {
+  const profile = state.resumeProfile || {};
+  const drafts = Array.isArray(profile.extractedSkills) ? profile.extractedSkills : [];
+  const approvedDraftIds = new Set(profile.approvedSkillIds || []);
+  const resumeCategories = worldTreeCareerNodeMap && worldTreeCareerNodeMap.resume_categories;
+  if (!resumeCategories) return [];
+
+  const resolvedNodeIds = [];
+  drafts.forEach((draft) => {
+    if (!approvedDraftIds.has(draft.id)) return;
+    const categoryNodeIds = resumeCategories[draft.category];
+    if (Array.isArray(categoryNodeIds)) resolvedNodeIds.push(...categoryNodeIds);
+  });
+  return Array.from(new Set(resolvedNodeIds));
+}
+
+function startWorldTreeResumePursuits() {
+  const selectedNodeIds = getApprovedResumeNodeIds();
+  if (getWorldTreeTouchedNodeIds().size > 0 || selectedNodeIds.length === 0) return;
+
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.logEvent !== "function") return;
+
+  selectedNodeIds.forEach((nodeId) => {
+    graphApi.logEvent({
+      user_id: KAIRU_LOCAL_USER_ID,
+      node_id: nodeId,
+      state: "active",
+      current_level: 1,
+      xp: 0,
+      source: "resume",
+      initiatedBy: "player"
+    });
+  });
+  renderWorldTreeActivitySurface();
+}
+
+function toggleWorldTreeOnboardingSelection(nodeId) {
+  if (!nodeId || getWorldTreeTouchedNodeIds().size > 0) return;
+  worldTreeOnboardingSelectedCareer = "";
+  if (worldTreeOnboardingSelectedNodeIds.has(nodeId)) {
+    worldTreeOnboardingSelectedNodeIds.delete(nodeId);
+  } else {
+    worldTreeOnboardingSelectedNodeIds.add(nodeId);
+  }
+  renderWorldTreeOnboarding();
+  if (worldTreeSearchQuery) renderWorldTreeSearchResults();
+}
+
+function startWorldTreePursuits() {
+  if (
+    getWorldTreeTouchedNodeIds().size > 0 ||
+    worldTreeOnboardingSelectedNodeIds.size === 0
+  ) {
+    return;
+  }
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (!graphApi || typeof graphApi.logEvent !== "function") return;
+
+  const selectedNodeIds = Array.from(worldTreeOnboardingSelectedNodeIds);
+  selectedNodeIds.forEach((nodeId) => {
+    graphApi.logEvent({
+      user_id: KAIRU_LOCAL_USER_ID,
+      node_id: nodeId,
+      state: "active",
+      current_level: 1,
+      xp: 0,
+      source: "manual",
+      initiatedBy: "player"
+    });
+  });
+  worldTreeOnboardingSelectedNodeIds.clear();
+  renderWorldTreeActivitySurface();
+}
+
+function renderWorldTreeActivitySurface() {
+  renderWorldTreeOnboarding();
+  if (worldTreeSearchQuery) renderWorldTreeSearchResults();
+  else if (worldTreeActiveTrunk) renderWorldTreeTrunk();
+  else renderWorldTreeOverview();
+  updateViewStatus();
+}
+
 function renderWorldTreeOverview() {
   if (!els.worldTreeList || !worldTreeManifest) return;
   worldTreeActiveTrunk = null;
   const total = worldTreeManifest.length;
+  const touchedNodeIds = getWorldTreeTouchedNodeIds();
+  const nextAvailableNodeIds = getWorldTreeNextAvailableNodeIds();
   const counts = worldTreeManifest.reduce((byTrunk, node) => {
     byTrunk[node.trunkCategory] = (byTrunk[node.trunkCategory] || 0) + 1;
+    return byTrunk;
+  }, {});
+  const activeCounts = worldTreeManifest.reduce((byTrunk, node) => {
+    if (touchedNodeIds.has(node.id)) {
+      byTrunk[node.trunkCategory] = (byTrunk[node.trunkCategory] || 0) + 1;
+    }
+    return byTrunk;
+  }, {});
+  const nextAvailableCounts = worldTreeManifest.reduce((byTrunk, node) => {
+    if (nextAvailableNodeIds.has(node.id)) {
+      byTrunk[node.trunkCategory] = (byTrunk[node.trunkCategory] || 0) + 1;
+    }
     return byTrunk;
   }, {});
 
   els.worldTreeList.innerHTML = `<div class="world-tree-trunks">${
     Object.entries(TRUNK_CONFIG).map(([trunkName, config]) => {
       const count = counts[trunkName] || 0;
+      const activeCount = activeCounts[trunkName] || 0;
+      const nextAvailableCount = nextAvailableCounts[trunkName] || 0;
       const percentage = total ? ((count / total) * 100).toFixed(1) : "0.0";
       return `
-        <button class="world-tree-trunk" type="button"
+        <button class="world-tree-trunk${activeCount ? " has-activity" : ""}" type="button"
           data-action="world-tree-open-trunk" data-trunk="${escapeHTML(trunkName)}"
           style="--trunk-color:${config.color};--trunk-soft:${config.soft};--trunk-glow:${config.glow};">
           <span class="world-tree-trunk__swatch" aria-hidden="true"></span>
           <span class="world-tree-trunk__name">${escapeHTML(config.label)}</span>
-          <span class="world-tree-trunk__meta">${count.toLocaleString()} nodes · ${percentage}% of the tree</span>
+          ${activeCount ? `<span class="world-tree-activity-badge">${activeCount.toLocaleString()} active</span>` : ""}
+          ${nextAvailableCount ? `<span class="world-tree-next-available-badge">${nextAvailableCount.toLocaleString()} next available</span>` : ""}
+          <span class="world-tree-trunk__meta">${count.toLocaleString()} nodes · ${percentage}% of the tree · ${activeCount.toLocaleString()} active</span>
         </button>`;
     }).join("")
   }</div>`;
@@ -7234,6 +7559,9 @@ function renderWorldTreeSearchResults() {
   }
 
   worldTreeActiveTrunk = null;
+  const touchedNodeIds = getWorldTreeTouchedNodeIds();
+  const nextAvailableNodeIds = getWorldTreeNextAvailableNodeIds();
+  const isOnboarding = touchedNodeIds.size === 0;
   const matches = worldTreeManifest.filter((node) => {
     const searchable = [node.label, node.altLabels, node.hiddenLabels]
       .filter(Boolean)
@@ -7244,11 +7572,18 @@ function renderWorldTreeSearchResults() {
   const shown = Math.min(worldTreeSearchLimit, matches.length);
   const rows = matches.slice(0, shown).map((node) => {
     const config = TRUNK_CONFIG[node.trunkCategory] || TRUNK_CONFIG.Cognition;
+    const isActive = touchedNodeIds.has(node.id);
+    const isNextAvailable = !isActive && nextAvailableNodeIds.has(node.id);
+    const isSelected = worldTreeOnboardingSelectedNodeIds.has(node.id);
     return `
-      <button class="world-tree-node" type="button"
-        data-action="world-tree-open-node" data-node-id="${escapeHTML(node.id)}"
+      <button class="world-tree-node${isActive ? " is-active" : ""}${isNextAvailable ? " is-next-available" : ""}${isSelected ? " is-selected" : ""}" type="button"
+        data-action="${isOnboarding ? "world-tree-toggle-selection" : "world-tree-open-node"}"
+        data-node-id="${escapeHTML(node.id)}"${isOnboarding ? ` aria-pressed="${isSelected}"` : ""}
         style="--trunk-color:${config.color};">
         <span class="world-tree-node__label">${escapeHTML(node.label)}</span>
+        ${isActive ? '<span class="world-tree-activity-badge">Active</span>' : ""}
+        ${isNextAvailable ? '<span class="world-tree-next-available-badge">Next</span>' : ""}
+        ${isSelected ? '<span class="world-tree-selection-badge">Selected</span>' : ""}
         <span class="world-tree-node__meta">${escapeHTML(node.trunkCategory)} · ${Math.round(node.classificationConfidence * 100)}% confidence</span>
       </button>`;
   }).join("");
@@ -7270,14 +7605,26 @@ function renderWorldTreeTrunk() {
   if (!els.worldTreeList || !worldTreeManifest || !worldTreeActiveTrunk) return;
   const config = TRUNK_CONFIG[worldTreeActiveTrunk];
   const nodes = worldTreeManifest.filter((node) => node.trunkCategory === worldTreeActiveTrunk);
+  const touchedNodeIds = getWorldTreeTouchedNodeIds();
+  const nextAvailableNodeIds = getWorldTreeNextAvailableNodeIds();
+  const activeCount = nodes.reduce(
+    (count, node) => count + (touchedNodeIds.has(node.id) ? 1 : 0),
+    0
+  );
   const shown = Math.min(worldTreeRenderLimit, nodes.length);
-  const nodeRows = nodes.slice(0, shown).map((node) => `
-    <button class="world-tree-node" type="button"
-      data-action="world-tree-open-node" data-node-id="${escapeHTML(node.id)}"
-      style="--trunk-color:${config.color};">
-      <span class="world-tree-node__label">${escapeHTML(node.label)}</span>
-      <span class="world-tree-node__meta">${escapeHTML(node.nodeType)} · ${Math.round(node.classificationConfidence * 100)}% confidence</span>
-    </button>`).join("");
+  const nodeRows = nodes.slice(0, shown).map((node) => {
+    const isActive = touchedNodeIds.has(node.id);
+    const isNextAvailable = !isActive && nextAvailableNodeIds.has(node.id);
+    return `
+      <button class="world-tree-node${isActive ? " is-active" : ""}${isNextAvailable ? " is-next-available" : ""}" type="button"
+        data-action="world-tree-open-node" data-node-id="${escapeHTML(node.id)}"
+        style="--trunk-color:${config.color};">
+        <span class="world-tree-node__label">${escapeHTML(node.label)}</span>
+        ${isActive ? '<span class="world-tree-activity-badge">Active</span>' : ""}
+        ${isNextAvailable ? '<span class="world-tree-next-available-badge">Next</span>' : ""}
+        <span class="world-tree-node__meta">${escapeHTML(node.nodeType)} · ${Math.round(node.classificationConfidence * 100)}% confidence</span>
+      </button>`;
+  }).join("");
   const loadMore = shown < nodes.length
     ? `<button class="archive-load-more" type="button" data-action="world-tree-load-more">
         Load more — showing ${shown.toLocaleString()} of ${nodes.length.toLocaleString()}
@@ -7288,7 +7635,7 @@ function renderWorldTreeTrunk() {
     <div class="world-tree-list-head">
       <button class="btn ghost" type="button" data-action="world-tree-overview">← All trunks</button>
       <h4>${escapeHTML(config.label)}</h4>
-      <span class="world-tree-node__meta">${nodes.length.toLocaleString()} nodes</span>
+      <span class="world-tree-node__meta">${nodes.length.toLocaleString()} nodes · ${activeCount.toLocaleString()} active</span>
     </div>
     <div class="world-tree-nodes">${nodeRows}</div>
     ${loadMore}`;
@@ -7297,8 +7644,12 @@ function renderWorldTreeTrunk() {
 function openWorldTreeNode(nodeId) {
   const entry = worldTreeManifestById.get(nodeId);
   if (!entry || !els.worldTreeDetailModal || !els.worldTreeDetailContent) return;
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
 
   worldTreeDetailNodeId = nodeId;
+  worldTreeDetailOverlayState = graphApi && typeof graphApi.getOverlayState === "function"
+    ? graphApi.getOverlayState(KAIRU_LOCAL_USER_ID, nodeId)
+    : null;
   worldTreeParentLimit = 25;
   worldTreeChildLimit = 25;
   renderWorldTreeNodeDetail();
@@ -7309,23 +7660,44 @@ function openWorldTreeNode(nodeId) {
     return;
   }
   if (!worldTreeFullGraphPromise) {
-    const graphApi = window.KAIRU && window.KAIRU.skillGraph;
     if (!graphApi || typeof graphApi.load !== "function") {
       renderWorldTreeNodeDetail("The graph detail loader is unavailable.");
       return;
     }
-    worldTreeFullGraphPromise = graphApi.load()
-      .then((graph) => {
-        worldTreeFullGraph = graph;
-        if (worldTreeDetailNodeId) renderWorldTreeNodeDetail();
-        return graph;
-      })
-      .catch((error) => {
-        worldTreeFullGraphPromise = null;
-        renderWorldTreeNodeDetail(error.message || String(error));
-        return null;
-      });
+    ensureWorldTreeFullGraphLoaded(graphApi);
   }
+}
+
+function logWorldTreeProgress() {
+  if (!worldTreeDetailNodeId || worldTreeDetailOverlayState) return;
+  const graphApi = window.KAIRU && window.KAIRU.skillGraph;
+  if (
+    !graphApi ||
+    typeof graphApi.logEvent !== "function" ||
+    typeof graphApi.getOverlayState !== "function"
+  ) {
+    return;
+  }
+
+  graphApi.logEvent({
+    user_id: KAIRU_LOCAL_USER_ID,
+    node_id: worldTreeDetailNodeId,
+    state: "active",
+    current_level: 1,
+    xp: 0,
+    source: "manual",
+    initiatedBy: "player"
+  });
+  worldTreeDetailOverlayState = graphApi.getOverlayState(KAIRU_LOCAL_USER_ID, worldTreeDetailNodeId);
+  renderWorldTreeActivitySurface();
+  renderWorldTreeNodeDetail();
+}
+
+function generateQuestFromWorldTreeNode(nodeId) {
+  const entry = worldTreeManifestById.get(nodeId);
+  if (!entry) return;
+  hideModal(els.worldTreeDetailModal);
+  openQuest({ nodeId, nodeLabel: entry.label });
 }
 
 function worldTreeEdgeLinks(ids, relation, visibleLimit) {
@@ -7356,6 +7728,30 @@ function renderWorldTreeNodeDetail(errorMessage = "") {
   const config = TRUNK_CONFIG[entry.trunkCategory] || TRUNK_CONFIG.Cognition;
   const fullNode = worldTreeFullGraph && worldTreeFullGraph.getNode(worldTreeDetailNodeId);
   const statusLabel = entry.status === "auto_committed" ? "Classified" : "Awaiting review";
+  const overlayState = worldTreeDetailOverlayState;
+  const overlayDetail = overlayState
+    ? `<div class="world-tree-detail__classification"
+        style="--trunk-color:${config.color};--trunk-soft:${config.soft};">
+        <strong>Player progress</strong>
+        <span>${escapeHTML(String(overlayState.state))} · Level ${escapeHTML(String(overlayState.current_level))} · ${escapeHTML(String(overlayState.xp))} XP · ${escapeHTML(String(overlayState.source))}</span>
+      </div>`
+    : "";
+  // A node is next-available exactly when one of its own parents is a touched
+  // (active-pursuit) node — the inverse of getWorldTreeNextAvailableNodeIds'
+  // children-of-active-nodes direction. Reuses fullNode.parents (already
+  // loaded for the edges section below) instead of recomputing the whole
+  // tree-wide set just to find one suggesting parent.
+  const touchedNodeIds = getWorldTreeTouchedNodeIds();
+  const suggestingParentId = !overlayState && fullNode
+    ? fullNode.parents.find((parentId) => touchedNodeIds.has(parentId))
+    : null;
+  const suggestedNext = suggestingParentId
+    ? `<p class="world-tree-detail__suggested">Suggested next, based on <strong>${escapeHTML((worldTreeManifestById.get(suggestingParentId) || {}).label || suggestingParentId)}</strong>.</p>`
+    : "";
+  const progressAction = overlayState
+    ? ""
+    : '<button class="btn primary" type="button" data-action="world-tree-log-progress">Start developing this</button>';
+  const generateQuestAction = `<button class="btn ghost" type="button" data-action="world-tree-generate-quest" data-node-id="${escapeHTML(worldTreeDetailNodeId)}">Generate quest for this skill</button>`;
   const detailBody = errorMessage
     ? `<p class="world-tree-detail__error">Description and graph edges could not be reached: ${escapeHTML(errorMessage)}</p>`
     : fullNode
@@ -7386,6 +7782,10 @@ function renderWorldTreeNodeDetail(errorMessage = "") {
       <strong>${escapeHTML(entry.trunkCategory)}</strong>
       <span>${statusLabel} · ${Math.round(entry.classificationConfidence * 100)}% confidence</span>
     </div>
+    ${overlayDetail}
+    ${suggestedNext}
+    ${progressAction}
+    ${generateQuestAction}
     ${detailBody}`;
 }
 
@@ -7465,108 +7865,15 @@ function suggestSkillMeta(name) {
   return { category, tier, xp: defaults.xp, xpMax: defaults.xpMax };
 }
 
-// Career presets: choosing one seeds a starter registry. Tiers/XP are suggestions
-// the operator can adjust afterward via "Adjust XP".
-const CAREER_PRESETS = {
-  'Software Engineer': [
-    { name: 'Web / App Building', category: 'Technical / Digital', tier: 'proficient', tags: ['HTML/CSS', 'JavaScript', 'APIs'] },
-    { name: 'Data & Analytics', category: 'Technical / Digital', tier: 'acquiring', tags: ['SQL', 'Dashboards'] },
-    { name: 'AI Tools & Prompting', category: 'Technical / Digital', tier: 'acquiring', tags: ['Prompting', 'Workflow AI'] },
-    { name: 'Strategy & Vision', category: 'Business / Leadership', tier: 'acquiring', tags: ['Systems Thinking'] }
-  ],
-  'Sales / Business': [
-    { name: 'Sales & Negotiation', category: 'Business / Leadership', tier: 'proficient', tags: ['Closing', 'Persuasion'] },
-    { name: 'Strategy & Vision', category: 'Business / Leadership', tier: 'acquiring', tags: ['Macro Planning'] },
-    { name: 'Marketing', category: 'Business / Leadership', tier: 'acquiring', tags: ['Funnels', 'Positioning'] },
-    { name: 'Data & Analytics', category: 'Technical / Digital', tier: 'acquiring', tags: ['Metrics'] }
-  ],
-  'Creative / Designer': [
-    { name: 'Design & Visual', category: 'Creative / Arts', tier: 'proficient', tags: ['Visual Identity', 'Composition'] },
-    { name: 'Video & Film', category: 'Creative / Arts', tier: 'acquiring', tags: ['Editing', 'Storytelling'] },
-    { name: 'Content & Writing', category: 'Creative / Arts', tier: 'acquiring', tags: ['Copy', 'Narrative'] },
-    { name: 'AI Tools & Prompting', category: 'Technical / Digital', tier: 'acquiring', tags: ['Generative AI'] }
-  ],
-  'Athlete / Physical': [
-    { name: 'Strength & Conditioning', category: 'Physical / Athletic', tier: 'proficient', tags: ['Programming', 'Recovery'] },
-    { name: 'Endurance / Cardio', category: 'Physical / Athletic', tier: 'acquiring', tags: ['Zone 2', 'Pacing'] },
-    { name: 'Mobility / Flexibility', category: 'Physical / Athletic', tier: 'acquiring', tags: ['Range', 'Prehab'] }
-  ],
-  'Healthcare': [
-    { name: 'Clinical Practice', category: 'Technical / Digital', tier: 'beginner', tags: ['Patient Care'] },
-    { name: 'Pharmacology', category: 'Technical / Digital', tier: 'acquiring', tags: ['Medication'] },
-    { name: 'Operations', category: 'Business / Leadership', tier: 'acquiring', tags: ['Workflow', 'Compliance'] }
-  ],
-  'Trades / Skilled Labor': [
-    { name: 'Core Trade Craft', category: 'Physical / Athletic', tier: 'beginner', tags: ['Hands-on'] },
-    { name: 'Safety & Compliance', category: 'Business / Leadership', tier: 'acquiring', tags: ['Standards'] },
-    { name: 'Estimating / Bidding', category: 'Business / Leadership', tier: 'acquiring', tags: ['Quotes'] }
-  ]
-};
-
-function applyCareerPreset(careerKey) {
-  const preset = CAREER_PRESETS[careerKey];
-  if (!preset) return;
-  if (!Array.isArray(state.skills)) state.skills = [];
-  let added = 0;
-  preset.forEach(item => {
-    const exists = state.skills.some(s => String(s.name || '').toLowerCase() === item.name.toLowerCase());
-    if (exists) return;
-    const defaults = TIER_XP_DEFAULTS[item.tier] || TIER_XP_DEFAULTS.acquiring;
-    state.skills.push({
-    id: 'sk-' + KAIRU_TIME.nowMs() + '-' + added,
-      name: item.name,
-      category: item.category,
-      tier: item.tier,
-      xp: defaults.xp,
-      xpMax: defaults.xpMax,
-      tags: item.tags || []
-    });
-    added++;
-  });
-  saveState();
-  renderAll();
-  showToast(added ? `${careerKey} preset added // ${added} skills` : 'Those skills already exist');
-}
-
-function skillsOnboardingHTML() {
-  const careerOptions = Object.keys(CAREER_PRESETS)
-    .map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
-  return `
-  <div class="skill-onboard" style="grid-column:1/-1;">
-    <div class="skill-onboard__head">
-      <div class="skill-onboard__title">Build your Skill Registry</div>
-      <div class="skill-onboard__copy">KAIRU starts empty. Seed your capabilities one of three ways — KAIRU suggests a starting archetype, tier and XP, and you can fine-tune anything after.</div>
-    </div>
-    <div class="skill-onboard__grid">
-      <div class="skill-onboard__card">
-        <div class="skill-onboard__num">01</div>
-        <div class="skill-onboard__name">Extract from Resume</div>
-        <div class="skill-onboard__desc">Paste your resume below and KAIRU pulls draft skills to approve.</div>
-        <button class="btn cyan" type="button" data-action="onboard-resume" style="width:100%;justify-content:center;">Go to Resume Import</button>
-      </div>
-      <div class="skill-onboard__card">
-        <div class="skill-onboard__num">02</div>
-        <div class="skill-onboard__name">Pick a Career</div>
-        <div class="skill-onboard__desc">Choose a path and KAIRU seeds a suggested starter set.</div>
-        <select id="careerPresetSelect" class="skill-onboard__select">${careerOptions}</select>
-        <button class="btn cyan" type="button" data-action="apply-career" style="width:100%;justify-content:center;margin-top:8px;">Seed These Skills</button>
-      </div>
-      <div class="skill-onboard__card">
-        <div class="skill-onboard__num">03</div>
-        <div class="skill-onboard__name">Create Manually</div>
-        <div class="skill-onboard__desc">Add a single skill — type a name and KAIRU pre-fills the rest.</div>
-        <button class="btn primary" type="button" data-action="open-skill" style="width:100%;justify-content:center;">Add a Skill</button>
-      </div>
-    </div>
-  </div>`;
-}
+// The unreachable V2.5 Skills career onboarding was moved to
+// _archive/legacy-web/career-presets-v25-retired-2026-07-20.js.
 
 function renderSkills() {
   const container = document.getElementById('skillsList');
   if (!container) return;
   const skills = Array.isArray(state.skills) ? state.skills : [];
   if (!skills.length) {
-    container.innerHTML = skillsOnboardingHTML();
+    container.innerHTML = '<div class="empty">Start capabilities from the World Tree.</div>';
     return;
   }
 
@@ -7896,6 +8203,13 @@ document.addEventListener("click", (event) => {
   if (action === "world-tree-overview") showWorldTreeOverview();
   if (action === "world-tree-open-trunk") openWorldTreeTrunk(actionTarget.dataset.trunk);
   if (action === "world-tree-open-node") openWorldTreeNode(actionTarget.dataset.nodeId);
+  if (action === "world-tree-toggle-selection") toggleWorldTreeOnboardingSelection(actionTarget.dataset.nodeId);
+  if (action === "world-tree-select-career") selectWorldTreeCareerPreset(actionTarget.dataset.career);
+  if (action === "world-tree-start-career-preset") startWorldTreeCareerPreset();
+  if (action === "world-tree-start-resume") startWorldTreeResumePursuits();
+  if (action === "world-tree-start-pursuing") startWorldTreePursuits();
+  if (action === "world-tree-log-progress") logWorldTreeProgress();
+  if (action === "world-tree-generate-quest") generateQuestFromWorldTreeNode(actionTarget.dataset.nodeId);
   if (action === "world-tree-close-detail") hideModal(els.worldTreeDetailModal);
   if (action === "world-tree-more-edges") {
     if (actionTarget.dataset.relation === "parents") worldTreeParentLimit += 25;
@@ -7940,10 +8254,6 @@ document.addEventListener("click", (event) => {
   if (action === "goview") navigateToView(actionTarget.dataset.view);
   if (action === "open-more") openMore();
   if (action === "close-more") closeMore();
-  if (action === "apply-career") {
-    const sel = document.getElementById("careerPresetSelect");
-    if (sel) applyCareerPreset(sel.value);
-  }
   if (action === "onboard-resume") {
     navigateToView("skills");
     const ta = document.getElementById("resumeTextInput");
@@ -8577,7 +8887,7 @@ function assembleAIContext() {
   const activeQuests = Array.isArray(s.activeQuests) ? s.activeQuests : [];
   const disciplines = Array.isArray(s.disciplines) ? s.disciplines : [];
   const pipeline = Array.isArray(s.jobPipeline) ? s.jobPipeline : [];
-  const skills = Array.isArray(s.skills) ? s.skills : [];
+  const skills = getSkillGraphOverlayDisplayRows();
   const financials = s.financials || {};
   const incomeConfig = s.incomeConfig || {};
 
@@ -8726,11 +9036,11 @@ function assembleAIContext() {
     advancedItems
   };
 
-  // --- SKILLS (live skills carry tier + xp, not a numeric level) ---
+  // --- SKILLS (unified World Tree overlay: node + current_level + xp) ---
   const topByLevel = skills.slice()
     .sort((a, b) => (Number(b.xp) || 0) - (Number(a.xp) || 0))
     .slice(0, 3)
-    .map(sk => ({ name: sk.name, tier: sk.tier || null, xp: Number(sk.xp) || 0 }));
+    .map(sk => ({ name: sk.name, tier: null, xp: Number(sk.xp) || 0 }));
 
   const skillsContext = {
     totalTracked: skills.length,
@@ -9235,8 +9545,25 @@ if (typeof window !== 'undefined') {
           state.economic_agency_nudges_fired
         )
       ),
+      extractResumeSkills,
+      approveResumeSkills,
       clearResume,
       renderEconomicAgency,
+      renderWorldTreeOnboarding,
+      ensureWorldTreeLoaded,
+      toggleWorldTreeOnboardingSelection,
+      startWorldTreePursuits,
+      ensureWorldTreeCareerNodeMapLoaded,
+      selectWorldTreeCareerPreset,
+      startWorldTreeCareerPreset,
+      startWorldTreeResumePursuits,
+      getWorldTreeOnboardingSelectedNodeIds: () => Array.from(worldTreeOnboardingSelectedNodeIds),
+      getWorldTreeNextAvailableNodeIds: () => Array.from(getWorldTreeNextAvailableNodeIds()),
+      openWorldTreeNode,
+      generateQuestFromWorldTreeNode,
+      openQuest,
+      saveQuest,
+      completeQuest,
       economicAgencyEvents: ECONOMIC_AGENCY_EVENTS,
       economicAgencyTierMultipliers: ECONOMIC_AGENCY_TIER_MULTIPLIERS,
       economicAgencyLevelThresholds: ECONOMIC_AGENCY_LEVEL_THRESHOLDS,

@@ -28,6 +28,7 @@ const SKILL_GRAPH_OVERLAY_REQUIRED_FIELDS = [
   'user_id', 'node_id', 'state', 'current_level', 'xp', 'source', 'initiatedBy'
 ];
 let worldTreeManifestPromise = null;
+let careerNodeMapPromise = null;
 let fullSkillGraphPromise = null;
 
 function loadWorldTreeManifest(fetchImpl) {
@@ -56,6 +57,41 @@ function loadWorldTreeManifest(fetchImpl) {
   });
 
   return worldTreeManifestPromise;
+}
+
+function loadCareerNodeMap(fetchImpl) {
+  if (careerNodeMapPromise) return careerNodeMapPromise;
+
+  const doFetch = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+  if (!doFetch) {
+    return Promise.reject(new Error('world-tree: no fetch implementation available'));
+  }
+
+  careerNodeMapPromise = Promise.resolve(
+    doFetch(`${SKILL_GRAPH_DATA_PATH}/career_node_map.json`)
+  ).then((response) => {
+    if (response && 'ok' in response && !response.ok) {
+      throw new Error(`world-tree: career node map request failed (${response.status})`);
+    }
+    return response.json();
+  }).then((nodeMap) => {
+    if (
+      !nodeMap ||
+      typeof nodeMap !== 'object' ||
+      Array.isArray(nodeMap) ||
+      !nodeMap.careers ||
+      typeof nodeMap.careers !== 'object' ||
+      Array.isArray(nodeMap.careers)
+    ) {
+      throw new Error('world-tree: career node map payload must include a careers object');
+    }
+    return nodeMap;
+  }).catch((error) => {
+    careerNodeMapPromise = null;
+    throw error;
+  });
+
+  return careerNodeMapPromise;
 }
 
 function buildSkillGraph(nodes, edges) {
@@ -238,6 +274,7 @@ if (typeof window !== 'undefined') {
     schemaVersion: SKILL_GRAPH_SCHEMA_VERSION,
     load: loadSkillGraph,
     loadWorldTreeManifest,
+    loadCareerNodeMap,
     build: buildSkillGraph,
     logEvent: logSkillGraphEvent,
     getOverlayState: getSkillGraphOverlayState,
@@ -256,6 +293,7 @@ if (typeof module !== 'undefined' && module.exports) {
     buildSkillGraph,
     loadSkillGraph,
     loadWorldTreeManifest,
+    loadCareerNodeMap,
     readSkillGraphOverlay,
     writeSkillGraphOverlay,
     readSkillGraphEvents,

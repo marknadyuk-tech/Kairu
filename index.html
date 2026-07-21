@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- source: 28240cd-dirty @ 2026-07-19 18:40 -->
+<!-- source: bf5bb52-dirty @ 2026-07-20 23:33 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -123,11 +123,11 @@
           <span class="tab__hint">Opportunity tracker</span>
         </span>
       </button>
-      <button class="tab" type="button" data-view="skills">
+      <button class="tab" type="button" data-view="worldtree">
         <span class="tab__icon">05</span>
         <span class="tab__text">
-          <span class="tab__label">Skills</span>
-          <span class="tab__hint">Registry</span>
+          <span class="tab__label">World Tree</span>
+          <span class="tab__hint">Capability atlas</span>
         </span>
       </button>
       <button class="tab" type="button" data-view="financial">
@@ -212,7 +212,7 @@
             <div class="card__value cyan" id="metricDays">0</div>
             <div class="card__meta">Current operating cycle</div>
           </article>
-          <article class="card card--link" data-action="goview" data-view="skills" role="button" tabindex="0" aria-label="Skill XP — open Skills">
+          <article class="card card--link" data-action="goview" data-view="worldtree" role="button" tabindex="0" aria-label="Skill XP — open World Tree">
             <div class="card__label">Skill XP</div>
             <div class="card__value cyan" id="metricKXP">0</div>
             <div class="card__meta">Capability growth</div>
@@ -548,37 +548,19 @@
       </div>
     </section>
 
-    <section class="view" id="skills" aria-label="Skills registry">
+    <section class="view" id="worldTree" aria-label="World Tree">
       <div class="section">
         <div class="section-head">
           <div>
-            <h3 class="section-title">Skill Registry</h3>
-            <p class="section-note">Your capabilities across categories. XP bars show progress to tier ceiling.</p>
+            <h3 class="section-title">World Tree</h3>
+            <p class="section-note">Explore the shared taxonomy of capabilities across nine distinct trunks.</p>
           </div>
-          <button class="btn primary" type="button" data-action="open-skill"><span class="btn__icon">+</span>Add Skill</button>
-        </div>
-        <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));" id="skillsList"></div>
-      </div>
-
-      <div class="section" id="resumeSection">
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">Resume Import</h3>
-            <p class="section-note">Paste resume text to extract draft skills via keyword matching. Approve drafts into the registry. No XP awarded.</p>
-          </div>
-        </div>
-        <div class="panel">
-          <label>
-            Resume Text
-            <textarea id="resumeTextInput" placeholder="Paste your resume or experience summary here..." style="min-height:120px;"></textarea>
+          <label class="world-tree-search">
+            <input id="worldTreeSearch" type="search" aria-label="Search World Tree nodes" placeholder="Search 17,587 nodes…" autocomplete="off">
           </label>
-          <div class="modal-foot" style="justify-content:flex-start;margin-top:0;">
-            <button class="btn cyan" type="button" data-action="extract-resume">Extract Draft Skills</button>
-            <button class="btn ghost" type="button" data-action="clear-resume">Clear</button>
-          </div>
-          <div id="resumeDrafts" style="margin-top:18px;"></div>
-          <div id="resumeSuggestedQuests" style="margin-top:18px;"></div>
         </div>
+        <div id="worldTreeOnboarding" aria-live="polite"></div>
+        <div id="worldTreeList" aria-live="polite"></div>
       </div>
 
       <div class="section" id="economicAgencySection">
@@ -612,21 +594,6 @@
             <button class="btn primary" type="button" data-action="log-economic-agency-event">Log Event</button>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section class="view" id="worldTree" aria-label="World Tree">
-      <div class="section">
-        <div class="section-head">
-          <div>
-            <h3 class="section-title">World Tree</h3>
-            <p class="section-note">Explore the shared taxonomy of capabilities across nine distinct trunks.</p>
-          </div>
-          <label class="world-tree-search">
-            <input id="worldTreeSearch" type="search" aria-label="Search World Tree nodes" placeholder="Search 17,587 nodes…" autocomplete="off">
-          </label>
-        </div>
-        <div id="worldTreeList" aria-live="polite"></div>
       </div>
     </section>
 
@@ -670,8 +637,8 @@
   <button class="bottom-nav__item" type="button" data-action="goview" data-view="discipline">
     <span class="bottom-nav__icon">&#9650;</span><span class="bottom-nav__label">Discipline</span>
   </button>
-  <button class="bottom-nav__item" type="button" data-action="goview" data-view="skills">
-    <span class="bottom-nav__icon">&#9679;</span><span class="bottom-nav__label">Skills</span>
+  <button class="bottom-nav__item" type="button" data-action="goview" data-view="worldtree">
+    <span class="bottom-nav__icon">&#9679;</span><span class="bottom-nav__label">World Tree</span>
   </button>
   <button class="bottom-nav__item" type="button" data-action="open-more">
     <span class="bottom-nav__icon">&#8943;</span><span class="bottom-nav__label">More</span>
@@ -690,7 +657,6 @@
       <button class="more-sheet__link" type="button" data-action="goview" data-view="financial"><b>Financial</b><span>Net position</span></button>
       <button class="more-sheet__link" type="button" data-action="goview" data-view="sovereignty"><b>Sovereignty</b><span>Security & Data</span></button>
       <button class="more-sheet__link" type="button" data-action="goview" data-view="archive"><b>Chronicle</b><span>Deep history</span></button>
-      <button class="more-sheet__link" type="button" data-action="goview" data-view="worldtree"><b>World Tree</b><span>Capability atlas</span></button>
     </div>
     <div class="more-sheet__utils">
       <button class="btn ghost" type="button" data-action="export-backup">Export Backup</button>
@@ -707,6 +673,7 @@
       Title
       <input id="questTitle" autocomplete="off" placeholder="Launch Phase 1 financial dashboard" maxlength="80">
     </label>
+    <div id="questTiedSkillIndicator" style="display:none;margin:-4px 0 10px;font-size:11px;color:var(--text-muted);"></div>
     <div class="field-grid">
       <label>
         Rarity
@@ -959,49 +926,6 @@
   </div>
 </div>
 
-<div class="modal-bg" id="skillModal" role="dialog" aria-modal="true" aria-labelledby="skillModalTitle">
-  <div class="modal">
-    <h2 id="skillModalTitle">Register Skill</h2>
-    <div class="field-grid">
-      <label>
-        Skill Name
-        <input type="text" id="skillNameInput" placeholder="e.g. Jiu-Jitsu, Python" maxlength="40">
-      </label>
-      <label>
-        Category
-        <select id="skillCategoryInput">
-          <option value="Business / Leadership">Business / Leadership</option>
-          <option value="Technical / Digital">Technical / Digital</option>
-          <option value="Creative / Arts">Creative / Arts</option>
-          <option value="Physical / Athletic">Physical / Athletic</option>
-        </select>
-      </label>
-      <label>
-        Tier
-        <select id="skillTierInput">
-          <option value="acquiring">Acquiring — 1,000 base XP</option>
-          <option value="beginner">Beginner — 1,000 base XP</option>
-          <option value="moderate">Moderate — 1,200 base XP</option>
-          <option value="proficient">Proficient — 1,800 base XP</option>
-          <option value="expert">Expert — 2,500 base XP</option>
-        </select>
-      </label>
-      <label>
-        XP Invested
-        <input type="number" id="skillXPInput" min="0" step="10" value="1000">
-      </label>
-    </div>
-    <label>
-      Tags <span style="color:var(--text-dim);font-size:10px;letter-spacing:0;text-transform:none;">(comma separated)</span>
-      <input type="text" id="skillTagsInput" placeholder="e.g. Closing, Persuasion, Deal Structure" maxlength="100">
-    </label>
-    <div class="modal-foot">
-      <button class="btn primary" type="button" data-action="save-skill">Register</button>
-      <button class="btn ghost" type="button" data-action="close-skill">Cancel</button>
-    </div>
-  </div>
-</div>
-
 <div class="modal-bg" id="incomeModal" role="dialog" aria-modal="true" aria-labelledby="incomeModalTitle">
   <div class="modal">
     <h2 id="incomeModalTitle">Edit Income Config</h2>
@@ -1210,7 +1134,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="assets/kairu-app.js"></script>
 <script src="assets/skill-graph.js"></script>
+<script src="assets/kairu-app.js"></script>
 </body>
 </html>
